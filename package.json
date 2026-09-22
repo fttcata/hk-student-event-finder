@@ -1,0 +1,28 @@
+{
+  "name": "project",
+  "version": "1.0.0",
+  "description": "Modern Tech on WWW group project",
+  "private": true,
+  "workspaces": ["client", "server"],
+  "scripts": {
+    "dev": "concurrently \"npm run dev --prefix server\" \"npm run dev --prefix client\"",
+    "dev:client": "npm run dev --prefix client",
+    "dev:server": "npm run dev --prefix server",
+    "build": "npm run build --prefix client"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fttcata/hk-student-event-finder.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  },
+  "bugs": {
+    "url": "https://github.com/fttcata/hk-student-event-finder/issues"
+  },
+  "homepage": "https://github.com/fttcata/hk-student-event-finder#readme"
+}
