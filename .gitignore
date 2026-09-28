@@ -16,3 +16,8 @@ client/dist/
 # Logs & OS metadata
 *.log
 .DS_Store
+
+# editor backups
+*~
+\#*\#
+.\#*

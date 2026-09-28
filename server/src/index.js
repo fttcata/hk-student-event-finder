@@ -21,7 +21,11 @@ app.get('/api/health', async (_request, response) => {
 app.get('/api/events', async (_request, response) => {
   try {
     const [events] = await pool.query(
-      'SELECT id, title, category, event_date AS date, location FROM events ORDER BY event_date ASC',
+      `SELECT e.id, e.title, c.name AS category, e.event_date AS date, e.location
+       FROM events e
+       JOIN categories c ON c.id = e.category_id
+       WHERE e.status = 'published'
+       ORDER BY e.event_date ASC`,
     )
     response.json({ events })
   } catch (error) {
