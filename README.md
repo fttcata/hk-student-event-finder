@@ -1,5 +1,5 @@
 # hk-student-event-finder
-Modern Tech on WWW group project.
+Modern Tech on WWW group project. (COMP3322)
 
 ## Stack
 
