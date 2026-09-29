@@ -2,10 +2,10 @@
 
 ## Member Information:
 Full Name	Email	UID
-Petre Andrei Catalin	U3671504@connect.hku.hk    3036715041
-Masud Muradli	U3636593@connect.hku.hk     3036365937
-Fung Kai Yui	U3622444@connect.hku.hk     3036224444
-Gaspar Montes	U3672012@connect.hku.hk     3036720125
+Petre Andrei Catalin	u3671504@connect.hku.hk    3036715041
+Masud Muradli	u3636593@connect.hku.hk     3036365937
+Fung Kai Yui	u3622444@connect.hku.hk     3036224444
+Gaspar Montes	u3672012@connect.hku.hk     3036720125
 Li Cheuk Hei	ansonhei@connect.hku.hk     3036234281
 
 ## Project Name
