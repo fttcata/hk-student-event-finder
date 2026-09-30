@@ -1,7 +1,7 @@
 import cors from 'cors'
 import express from 'express'
 import 'dotenv/config'
-import { pool } from './db.js'
+import { pool } from '../config/db.js'
 import helmet from 'helmet'
 
 
@@ -12,13 +12,8 @@ app.use(helmet())
 app.use(cors())
 app.use(express.json())
 
-app.get('/api/health', async (_request, response) => {
-  try {
-    await pool.query('SELECT 1')
-    response.json({ status: 'ok', database: 'connected' })
-  } catch (error) {
-    response.status(503).json({ status: 'error', database: 'unavailable' })
-  }
+app.get('/api/health', (_request, response) => {
+  response.status(200).json({ status: 'ok' })
 })
 
 app.get('/api/events', async (_request, response) => {
