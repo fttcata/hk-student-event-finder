@@ -1,55 +1,60 @@
-import { useEffect, useState } from 'react'
-import { Link, Route, Routes } from 'react-router-dom'
+import { Route, Routes } from 'react-router-dom'
+import Navbar from './components/Navbar.jsx'
+import ProtectedRoute from './components/ProtectedRoute.jsx'
+import CreateEventPage from './pages/CreateEventPage.jsx'
+import DashboardPage from './pages/DashboardPage.jsx'
+import EventDetailPage from './pages/EventDetailPage.jsx'
+import EventsPage from './pages/EventsPage.jsx'
+import HomePage from './pages/HomePage.jsx'
+import LoginPage from './pages/LoginPage.jsx'
+import NotFoundPage from './pages/NotFoundPage.jsx'
+import RegisterPage from './pages/RegisterPage.jsx'
 
-const sampleEvents = [
-  { id: 1, title: 'Campus Innovation Night', category: 'Technology', date: '2026-10-03', location: 'Central Campus' },
-  { id: 2, title: 'International Food Fair', category: 'Social', date: '2026-10-08', location: 'Student Union' },
-  { id: 3, title: 'Design Portfolio Workshop', category: 'Career', date: '2026-10-12', location: 'Media Lab' },
-]
-
-const apiBaseUrl = import.meta.env.VITE_API_URL || '/api'
-
-function Home() {
-  const [events, setEvents] = useState([])
-  const [apiStatus, setApiStatus] = useState('Checking API...')
-
-  useEffect(() => {
-    fetch(`${apiBaseUrl}/events`)
-      .then((response) => response.json())
-      .then((data) => {
-        setEvents(data.events)
-        setApiStatus('MySQL API connected')
-      })
-      .catch(() => {
-        setEvents(sampleEvents)
-        setApiStatus('Showing demo events')
-      })
-  }, [])
-
+// Every URL in the SPA and which page it renders. Protected pages require login.
+export default function App() {
   return (
-    <main>
-      <section className="hero">
-        <p className="eyebrow">HK STUDENT EVENT FINDER</p>
-        <h1>Find your next <em>good reason</em> to show up.</h1>
-        <p className="hero-copy">A focused home for talks, societies, workshops, and the moments that make campus feel smaller.</p>
-        <div className="hero-actions"><Link className="button button-dark" to="/events">Browse events</Link><a className="text-link" href="#how-it-works">How it works <span>↗</span></a></div>
-      </section>
-      <section className="event-section" id="how-it-works">
-        <div className="section-heading"><div><p className="eyebrow">UP NEXT</p><h2>Events worth leaving your room for.</h2></div><p className="status">● {apiStatus}</p></div>
-        <div className="event-grid">{events.map((event) => <article className="event-card" key={event.id}><p className="event-date">{new Date(event.date).toLocaleDateString('en-HK', { month: 'short', day: 'numeric' })}</p><h3>{event.title}</h3><p>{event.category} · {event.location}</p><a href="/events">View details <span>→</span></a></article>)}</div>
-      </section>
-    </main>
+    <div className="flex min-h-screen flex-col">
+      <Navbar />
+      <div className="flex-1">
+        <Routes>
+          <Route path="/" element={<HomePage />} />
+          <Route path="/events" element={<EventsPage />} />
+          <Route path="/events/:id" element={<EventDetailPage />} />
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/register" element={<RegisterPage />} />
+          <Route
+            path="/events/new"
+            element={
+              <ProtectedRoute>
+                <CreateEventPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/events/:id/edit"
+            element={
+              <ProtectedRoute>
+                <CreateEventPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/dashboard"
+            element={
+              <ProtectedRoute>
+                <DashboardPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route path="*" element={<NotFoundPage />} />
+        </Routes>
+      </div>
+      <footer className="border-t border-line">
+        <div className="mx-auto flex max-w-6xl flex-col justify-between gap-2 px-4 py-6 font-mono text-xs text-muted sm:flex-row sm:px-6">
+          <span>◒ Campus Hub · COMP3322 group project</span>
+          <span>HKU · CUHK · PolyU</span>
+        </div>
+      </footer>
+    </div>
   )
 }
-
-function Events() {
-  return <main className="events-page"><p className="eyebrow">DIRECTORY</p><h1>All events</h1><p>Search and filter controls can grow here as the event catalogue takes shape.</p><Link className="button button-dark" to="/">Back home</Link></main>
-}
-
-function App() {
-  return (
-    <><header><Link className="brand" to="/"><span>◒</span> event finder</Link><nav><Link to="/events">Events</Link><a href="#how-it-works">About</a></nav><Link className="nav-cta" to="/events">Explore <span>↗</span></Link></header><Routes><Route path="/" element={<Home />} /><Route path="/events" element={<Events />} /></Routes></>
-  )
-}
-
-export default App
