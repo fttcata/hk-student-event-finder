@@ -12,6 +12,10 @@ app.use(helmet())
 app.use(cors())
 app.use(express.json())
 
+app.get('/', (_request, response) => {
+  response.json({ message: 'Campus Hub API is running', frontend: 'http://localhost' })
+})
+
 app.get('/api/health', (_request, response) => {
   response.status(200).json({ status: 'ok' })
 })

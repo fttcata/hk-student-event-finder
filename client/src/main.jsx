@@ -9,8 +9,12 @@ import { AuthProvider } from './context/AuthContext.jsx'
 // BrowserRouter enables client-side routing; the providers make user state available to every page.
 createRoot(document.getElementById('root')).render(
   <StrictMode>
-    <BrowserRouter>
-      <App />
-    </BrowserRouter>
+    <AuthProvider>
+      <ActivityProvider>
+        <BrowserRouter>
+          <App />
+        </BrowserRouter>
+      </ActivityProvider>
+    </AuthProvider>
   </StrictMode>,
 )
