@@ -3,7 +3,7 @@ import express from 'express'
 import 'dotenv/config'
 import { pool } from '../config/db.js'
 import helmet from 'helmet'
-
+import authRoutes from '../routes/auth.js'
 
 const app = express()
 const port = Number(process.env.PORT || 5000)
@@ -19,6 +19,8 @@ app.get('/', (_request, response) => {
 app.get('/api/health', (_request, response) => {
   response.status(200).json({ status: 'ok' })
 })
+
+app.use('/api/auth', authRoutes)
 
 app.get('/api/events', async (_request, response) => {
   try {

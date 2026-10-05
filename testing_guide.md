@@ -53,7 +53,48 @@ curl.exe -i http://localhost/events               # SPA route
 
 Then open `http://localhost` in a browser — should show "MySQL API connected" and 3 events.
 
-## 7. Teardown
+## 7. Student registration tests (`POST /api/auth/register`)
+
+> Windows PowerShell mangles JSON passed straight to `curl.exe -d`, so each body is written to a file first.
+
+```powershell
+$dir = "$env:TEMP\regtests"; New-Item -ItemType Directory -Force -Path $dir | Out-Null
+$api = 'http://localhost:5000/api/auth/register'
+function Post($file, $expect) {
+  $code = curl.exe -s -o "$dir\out.json" -w "%{http_code}" -X POST $api -H "Content-Type: application/json" --data-binary "@$dir\$file"
+  $mark = if ($code -eq $expect) { 'PASS' } else { "FAIL (expected $expect)" }
+  "[$mark] $file -> $code  $(Get-Content "$dir\out.json" -Raw)"
+}
+function Body($file, $json) { Set-Content -LiteralPath "$dir\$file" -Value $json -Encoding ASCII -NoNewline }
+
+# 201 — new students from each allowed domain (returns { token, user })
+Body hku.json   '{"name":"Louis Chan","email":"louis@connect.hku.hk","password":"password123","student_id":"S1234567"}'
+Body cuhk.json  '{"name":"Anson Ho","email":"anson@link.cuhk.edu.hk","password":"password123"}'
+Body polyu.json '{"name":"Masud Ali","email":"masud@connect.polyu.hk","password":"password123"}'
+Post hku.json   201
+Post cuhk.json  201
+Post polyu.json 201
+
+# 409 — the same email registered twice
+Post hku.json 409
+
+# 400 — invalid payloads
+Body gmail.json     '{"name":"Test","email":"test@gmail.com","password":"password123"}'
+Body malformed.json '{"name":"Test","email":"not-an-email","password":"password123"}'
+Body noname.json    '{"email":"student@link.cuhk.edu.hk","password":"password123"}'
+Body shortpw.json   '{"name":"Test","email":"student@link.cuhk.edu.hk","password":"short"}'
+Post gmail.json     400
+Post malformed.json 400
+Post noname.json    400
+Post shortpw.json   400
+
+# the password must be stored as a bcrypt hash, never in plain text
+docker compose exec mysql mysql -uroot -proot_password student_events -e "SELECT id,name,email,role,university,is_verified,LEFT(password_hash,7) AS hash_prefix FROM users WHERE email='louis@connect.hku.hk';"
+```
+
+Expected: three `201`, one `409`, four `400`, and `hash_prefix = $2b$10` with `is_verified = 0`.
+
+## 8. Teardown
 
 ```powershell
 docker compose down        # keep data
