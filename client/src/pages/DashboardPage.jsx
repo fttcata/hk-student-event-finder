@@ -170,7 +170,7 @@ export default function DashboardPage() {
           <h1 className="display mt-4 text-5xl md:text-6xl">Hi, {user.name.split(' ')[0]}.</h1>
           <p className="mt-3 font-mono text-xs text-muted">{user.email}</p>
         </div>
-        <Link to="/events/new" className="btn btn-dark self-start md:self-auto">
+        <Link to="/create-event" className="btn btn-dark self-start md:self-auto">
           + Create event
         </Link>
       </div>

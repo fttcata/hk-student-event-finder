@@ -26,13 +26,18 @@ export default function Navbar() {
         Events
       </NavLink>
       {user && (
-        <NavLink to="/events/new" className={linkClass} onClick={closeMenu}>
+        <NavLink to="/create-event" className={linkClass} onClick={closeMenu}>
           Create
         </NavLink>
       )}
       {user && (
         <NavLink to="/dashboard" className={linkClass} onClick={closeMenu}>
           Dashboard
+        </NavLink>
+      )}
+      {user && (
+        <NavLink to="/profile" className={linkClass} onClick={closeMenu}>
+          Profile
         </NavLink>
       )}
     </>

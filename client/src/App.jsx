@@ -1,7 +1,6 @@
 import { Route, Routes } from 'react-router-dom'
 import Navbar from './components/Navbar.jsx'
 import ProtectedRoute from './components/ProtectedRoute.jsx'
-import { AuthProvider } from './context/AuthContext.jsx'
 import CreateEventPage from './pages/CreateEventPage.jsx'
 import DashboardPage from './pages/DashboardPage.jsx'
 import EventDetailPage from './pages/EventDetailPage.jsx'
@@ -15,7 +14,6 @@ import RegisterPage from './pages/RegisterPage.jsx'
 // Every URL in the SPA and which page it renders. Protected pages require login.
 export default function App() {
   return (
-    <AuthProvider>
       <div className="flex min-h-screen flex-col">
         <Navbar />
         <div className="flex-1">
@@ -30,6 +28,14 @@ export default function App() {
               element={
                 <ProtectedRoute>
                   <Profile />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/create-event"
+              element={
+                <ProtectedRoute>
+                  <CreateEventPage />
                 </ProtectedRoute>
               }
             />
@@ -67,6 +73,5 @@ export default function App() {
           </div>
         </footer>
       </div>
-    </AuthProvider>
   )
 }
