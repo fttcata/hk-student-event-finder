@@ -5,7 +5,6 @@ import { pool } from '../config/db.js'
 import helmet from 'helmet'
 import authRoutes from '../routes/auth.js'
 
-
 const app = express()
 const port = Number(process.env.PORT || 5000)
 

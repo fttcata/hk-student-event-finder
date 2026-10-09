@@ -3,12 +3,12 @@ import crypto from 'node:crypto'
 import { Router } from 'express'
 import jwt from 'jsonwebtoken'
 import { pool } from '../config/db.js'
-import { JWT_SECRET, requireAuth } from '../middleware/auth.js'
 
-const router = Router()
+if (!process.env.JWT_SECRET) {
+  throw new Error('JWT_SECRET is not set. Add it to server/.env (see .env.example).')
+}
 
-// Compared against when the email doesn't exist, so response time doesn't reveal which emails are registered.
-const DUMMY_HASH = bcrypt.hashSync('dummy-password', 10)
+const JWT_SECRET = process.env.JWT_SECRET
 
 // Must match client/src/utils/universities.js — only these student email domains may sign up.
 const UNIVERSITY_DOMAINS = {
@@ -16,6 +16,8 @@ const UNIVERSITY_DOMAINS = {
   CUHK: ['link.cuhk.edu.hk', 'cuhk.edu.hk'],
   PolyU: ['connect.polyu.hk', 'polyu.edu.hk'],
 }
+
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 function universityFromEmail(email) {
   const domain = email.split('@')[1]
@@ -28,6 +30,8 @@ function signToken(user) {
   })
 }
 
+const router = Router()
+
 router.post('/register', async (request, response) => {
   const { name, email, password, student_id: studentId } = request.body ?? {}
   const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : ''
@@ -38,7 +42,7 @@ router.post('/register', async (request, response) => {
   if (name.trim().length > 120) {
     return response.status(400).json({ error: 'Name must be 120 characters or fewer' })
   }
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+  if (!EMAIL_PATTERN.test(normalizedEmail)) {
     return response.status(400).json({ error: 'Enter a valid email address' })
   }
   const university = universityFromEmail(normalizedEmail)
@@ -62,11 +66,6 @@ router.post('/register', async (request, response) => {
       [name.trim(), normalizedEmail, passwordHash, studentId?.trim() || null, university, verificationCode],
     )
 
-    // No email service yet — log the code so it can be used with POST /api/auth/verify during development.
-    if (process.env.NODE_ENV !== 'production') {
-      console.log(`Verification code for ${normalizedEmail}: ${verificationCode}`)
-    }
-
     const user = {
       id: result.insertId,
       name: name.trim(),
@@ -76,6 +75,12 @@ router.post('/register', async (request, response) => {
       university,
       is_verified: false,
     }
+
+    // The verification code stays server-side until the email service sends it.
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(`Verification code for ${normalizedEmail}: ${verificationCode}`)
+    }
+
     response.status(201).json({ token: signToken(user), user })
   } catch (error) {
     if (error.code === 'ER_DUP_ENTRY') {
@@ -84,37 +89,6 @@ router.post('/register', async (request, response) => {
     console.error(error)
     response.status(500).json({ error: 'Unable to register' })
   }
-})
-
-router.post('/login', async (request, response) => {
-  const { email, password } = request.body ?? {}
-  if (typeof email !== 'string' || typeof password !== 'string' || !email.trim() || !password) {
-    return response.status(400).json({ error: 'Email and password are required' })
-  }
-
-  try {
-    const [[user]] = await pool.query(
-      `SELECT id, name, email, password_hash, role, student_id, university, is_verified
-       FROM users WHERE email = ?`,
-      [email.trim().toLowerCase()],
-    )
-
-    const passwordMatches = await bcrypt.compare(password, user?.password_hash ?? DUMMY_HASH)
-    if (!user || !passwordMatches) {
-      return response.status(401).json({ error: 'Invalid email or password' })
-    }
-
-    const { password_hash: _omit, ...student } = user
-    response.status(200).json({ token: signToken(user), user: { ...student, is_verified: Boolean(student.is_verified) } })
-  } catch (error) {
-    console.error(error)
-    response.status(500).json({ error: 'Unable to log in' })
-  }
-})
-
-// Returns the logged-in student — lets the client restore a session from a stored token.
-router.get('/me', requireAuth, (request, response) => {
-  response.status(200).json({ user: request.user })
 })
 
 export default router
