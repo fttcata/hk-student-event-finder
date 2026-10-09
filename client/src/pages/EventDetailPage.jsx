@@ -75,16 +75,21 @@ function TicketPanel({ event }) {
 
   return (
     <div className="panel space-y-5">
+      {hasLimit && (
+        <span className={`badge ${isFull ? 'bg-accent/10 text-accent' : 'bg-sage'}`}>
+          {Math.max(0, seatsLeft)} / {event.capacity} Tickets Remaining
+        </span>
+      )}
       <div>
-        <p className="text-xs text-muted">Price</p>
-        <p className="display text-4xl">{isPaid ? formatMoney(event.price) : 'Free'}</p>
+        <p className="text-xs text-muted">Ticket price</p>
+        <p className="display text-4xl">{formatMoney(event.price)}</p>
       </div>
 
       {hasLimit && (
         <div className="space-y-2">
           <ProgressBar value={event.booked} max={event.capacity} />
           <p className="text-sm">
-            {isFull ? 'Sold out' : `${seatsLeft} of ${event.capacity} seats left`}
+            {isFull ? 'Sold out' : `${Math.max(0, seatsLeft)} of ${event.capacity} seats left`}
           </p>
         </div>
       )}
@@ -186,6 +191,12 @@ function PledgePanel({ event }) {
 
   return (
     <form className="panel space-y-5" onSubmit={handleSubmit} noValidate>
+      <div>
+        <p className="eyebrow">Cause / pledge</p>
+        <p className="mt-2 text-sm leading-relaxed text-ink/80">
+          {event.cause || event.description || 'Support this campaign by making a pledge.'}
+        </p>
+      </div>
       <div>
         <p className="text-xs text-muted">Raised so far</p>
         <p className="display text-4xl">{formatMoney(event.raised)}</p>
@@ -293,8 +304,13 @@ export default function EventDetailPage() {
             {event.description || 'The organiser has not added a description yet.'}
           </p>
 
-          <h2 className="eyebrow mt-10 mb-4">Location</h2>
-          <MapEmbed query={event.location} className="h-72" />
+          <section className="panel mt-10 space-y-4" aria-labelledby="event-location-heading">
+            <div>
+              <h2 id="event-location-heading" className="eyebrow">Location</h2>
+              <p className="mt-2 font-medium">{event.location}</p>
+            </div>
+            <MapEmbed query={event.location} className="h-72" />
+          </section>
         </section>
 
         <aside className="space-y-3 self-start lg:sticky lg:top-24">
