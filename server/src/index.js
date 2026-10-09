@@ -16,8 +16,13 @@ app.get('/', (_request, response) => {
   response.json({ message: 'Campus Hub API is running', frontend: 'http://localhost' })
 })
 
-app.get('/api/health', (_request, response) => {
-  response.status(200).json({ status: 'ok' })
+app.get('/api/health', async (_request, response) => {
+  try {
+    await pool.query('SELECT 1')
+    response.status(200).json({ status: 'ok', database: 'connected' })
+  } catch {
+    response.status(503).json({ status: 'error', database: 'unavailable' })
+  }
 })
 
 app.use('/api/auth', authRoutes)

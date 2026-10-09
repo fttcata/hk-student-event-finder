@@ -3,6 +3,7 @@ import crypto from 'node:crypto'
 import { Router } from 'express'
 import jwt from 'jsonwebtoken'
 import { pool } from '../config/db.js'
+import { requireAuth } from '../middleware/auth.js'
 
 if (!process.env.JWT_SECRET) {
   throw new Error('JWT_SECRET is not set. Add it to server/.env (see .env.example).')
@@ -89,6 +90,41 @@ router.post('/register', async (request, response) => {
     console.error(error)
     response.status(500).json({ error: 'Unable to register' })
   }
+})
+
+router.post('/login', async (request, response) => {
+  const { email, password } = request.body ?? {}
+  const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : ''
+
+  if (!normalizedEmail || typeof password !== 'string') {
+    return response.status(401).json({ error: 'Invalid email or password' })
+  }
+
+  try {
+    const [[user]] = await pool.query('SELECT * FROM users WHERE email = ? LIMIT 1', [normalizedEmail])
+    if (!user || !(await bcrypt.compare(password, user.password_hash))) {
+      return response.status(401).json({ error: 'Invalid email or password' })
+    }
+
+    return response.json({
+      token: signToken(user),
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        studentId: user.student_id,
+        university: user.university,
+      },
+    })
+  } catch (error) {
+    console.error(error)
+    return response.status(500).json({ error: 'Unable to log in' })
+  }
+})
+
+router.get('/me', requireAuth, (request, response) => {
+  response.json({ user: request.user })
 })
 
 export default router

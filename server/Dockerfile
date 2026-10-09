@@ -8,6 +8,7 @@ RUN npm install --omit=dev
 COPY src ./src
 COPY config ./config
 COPY routes ./routes
+COPY middleware ./middleware
 
 ENV NODE_ENV=production
 ENV PORT=5000
