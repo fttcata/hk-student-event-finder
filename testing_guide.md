@@ -29,6 +29,11 @@ docker compose exec mysql mysql -uroot -proot_password student_events -e "SELECT
 ```powershell
 curl.exe http://localhost:5000/api/health
 curl.exe -i http://localhost:5000/api/events
+curl.exe -i http://localhost:5000/api/categories   # 200, 5 seeded categories
+curl.exe -i http://localhost:5000/api/events/2     # 200, price 20, tickets.booked 1, fundraiser null
+curl.exe -i http://localhost:5000/api/events/4     # 200, fundraiser.raised 350 of goal 5000, 3 pledges
+curl.exe -i http://localhost:5000/api/events/999   # 404
+curl.exe -i http://localhost:5000/api/events/abc   # 404
 ```
 
 ## 5. Status filter test
