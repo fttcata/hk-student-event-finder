@@ -41,11 +41,11 @@ curl.exe -i http://localhost:5000/api/events/abc   # 404
 ```powershell
 # hide an event
 docker compose exec mysql mysql -uroot -proot_password student_events -e "UPDATE events SET status='cancelled' WHERE id=1;"
-curl.exe http://localhost:5000/api/events        # expect 2 events
+curl.exe http://localhost:5000/api/events        # expect 3 events (total 3)
 
 # put it back
 docker compose exec mysql mysql -uroot -proot_password student_events -e "UPDATE events SET status='published' WHERE id=1;"
-curl.exe http://localhost:5000/api/events        # expect 3 events
+curl.exe http://localhost:5000/api/events        # expect 4 events (total 4)
 ```
 
 ## 6. Frontend through Nginx
@@ -99,7 +99,47 @@ docker compose exec mysql mysql -uroot -proot_password student_events -e "SELECT
 
 Expected: three `201`, one `409`, four `400`, and `hash_prefix = $2b$10` with `is_verified = 0`.
 
-## 8. Teardown
+## 8. Events list filtering tests (`GET /api/events`)
+
+Seed data has 4 published events: 3 standard (2 free, 1 paid) + 1 fundraiser
+(goal 5000, raised 350). `capacity = 0` means unlimited, so nothing seeded is
+sold out.
+
+```powershell
+$base = 'http://localhost:5000/api'
+function GetApi($path) {
+  $code = curl.exe -s -o "$env:TEMP\ev.json" -w "%{http_code}" "$base$path"
+  "$code  $path"
+}
+docker compose exec mysql mysql -uroot -proot_password student_events -e "SELECT id,name FROM categories;"
+
+# 200 — defaults return the envelope { events, page, limit, total }
+GetApi '/events'                                                     # total 4
+GetApi '/events?event_type=fundraiser'                               # 1 row
+GetApi '/events?event_type=standard'                                 # 3 rows
+GetApi '/events?price=free'                                          # 3 rows
+GetApi '/events?price=paid'                                          # 1 row (Food Fair)
+GetApi '/events?search=Food'                                         # 2 rows
+GetApi '/events?category_id=5'                                       # 1 row (Charity)
+GetApi '/events?availability=available'                              # 4 rows
+GetApi '/events?availability=sold_out'                               # 200, empty on seeds
+GetApi '/events?page=1&limit=2'                                      # 2 rows, total 4
+GetApi '/events?event_type=standard&price=free&search=workshop'      # 1 row
+
+# 400 — invalid filters
+GetApi '/events?event_type=bogus'
+GetApi '/events?price=x'
+GetApi '/events?category_id=abc'
+GetApi '/events?availability=x'
+GetApi '/events?page=0'
+GetApi '/events?limit=51'
+```
+
+To prove the `sold_out` filter hits, insert a throwaway capacity-1 event with one
+confirmed ticket, re-run `availability=sold_out` (expect 1 row,
+`available_tickets: 0`), then delete both rows again.
+
+## 9. Teardown
 
 ```powershell
 docker compose down        # keep data

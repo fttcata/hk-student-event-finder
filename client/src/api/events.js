@@ -1,8 +1,9 @@
 import { apiGet } from './client.js'
 import { demoEvents } from '../data/demoEvents.js'
 
-// The API currently returns only id, title, category, date and location,
-// so every other field gets a safe default until the backend query is extended.
+// The list endpoint returns both the new filter field names (total_tickets,
+// available_tickets, ...) and the original capacity/booked names, so reads
+// here accept either shape.
 export function normalizeEvent(raw) {
   return {
     id: String(raw.id),
@@ -14,9 +15,12 @@ export function normalizeEvent(raw) {
     date: raw.date,
     deadline: raw.deadline ?? raw.date,
     location: raw.location,
+    latitude: raw.latitude != null ? Number(raw.latitude) : null,
+    longitude: raw.longitude != null ? Number(raw.longitude) : null,
     university: raw.university ?? null,
-    capacity: Number(raw.capacity ?? 0),
-    booked: Number(raw.booked ?? 0),
+    capacity: Number(raw.capacity ?? raw.total_tickets ?? 0),
+    booked: Number(raw.booked ?? raw.booked_tickets ?? 0),
+    available: raw.available_tickets ?? null,
     price: Number(raw.price ?? 0),
     goal: Number(raw.fundraiser_goal ?? raw.goal ?? 0),
     raised: Number(raw.raised_amount ?? raw.raised ?? 0),
@@ -25,11 +29,26 @@ export function normalizeEvent(raw) {
   }
 }
 
-// GET /api/events → MySQL. Falls back to demo data so the UI is still usable without the backend.
-export async function fetchEvents() {
+// GET /api/events → MySQL. Filters map 1:1 to the backend query params
+// (search, category_id, event_type, availability, price, page, limit).
+// Falls back to demo data so the UI is still usable without the backend.
+export async function fetchEvents(filters = {}) {
   try {
-    const data = await apiGet('/events')
-    return { events: data.events.map(normalizeEvent), source: 'api' }
+    const params = new URLSearchParams()
+    for (const [key, value] of Object.entries(filters)) {
+      if (value !== undefined && value !== null && value !== '') {
+        params.set(key, String(value))
+      }
+    }
+    const query = params.toString()
+    const data = await apiGet(query ? `/events?${query}` : '/events')
+    return {
+      events: data.events.map(normalizeEvent),
+      source: 'api',
+      page: data.page ?? 1,
+      limit: data.limit ?? data.events.length,
+      total: data.total ?? data.events.length,
+    }
   } catch {
     return { events: demoEvents.map(normalizeEvent), source: 'demo' }
   }
