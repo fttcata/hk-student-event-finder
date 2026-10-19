@@ -139,7 +139,69 @@ To prove the `sold_out` filter hits, insert a throwaway capacity-1 event with on
 confirmed ticket, re-run `availability=sold_out` (expect 1 row,
 `available_tickets: 0`), then delete both rows again.
 
-## 9. Teardown
+## 9. Create event tests (`POST /api/events`, protected)
+
+> Creating events requires a verified student (`is_verified = 1`), per HANDOFF.md.
+> Registration creates unverified users, so the tests below flip the flag once to
+> stand in for the (not yet implemented) `POST /api/auth/verify`.
+
+```powershell
+$dir = "$env:TEMP\eventtests"; New-Item -ItemType Directory -Force -Path $dir | Out-Null
+$api = 'http://localhost:5000/api'
+function Body($file, $json) { Set-Content -LiteralPath "$dir\$file" -Value $json -Encoding ASCII -NoNewline }
+function Post($path, $file, $auth, $expect, $label) {
+  $headers = @('-H', 'Content-Type: application/json', '--data-binary', "@$dir\$file")
+  if ($auth) { $headers += @('-H', "Authorization: Bearer $auth") }
+  $code = curl.exe -s -o "$dir\out.json" -w "%{http_code}" -X POST "$api$path" @headers
+  $mark = if ($code -eq $expect) { 'PASS' } else { "FAIL (expected $expect)" }
+  "[$mark] $label -> $code  $(Get-Content "$dir\out.json" -Raw)"
+}
+
+# register + log in (user starts unverified), grab the token
+Body reg.json '{"name":"Event Tester","email":"eventtest@connect.hku.hk","password":"password123"}'
+curl.exe -s -X POST "$api/auth/register" -H "Content-Type: application/json" --data-binary "@$dir\reg.json" | Out-Null
+Body login.json '{"email":"eventtest@connect.hku.hk","password":"password123"}'
+$token = (curl.exe -s -X POST "$api/auth/login" -H "Content-Type: application/json" --data-binary "@$dir\login.json" | ConvertFrom-Json).token
+
+Body std.json '{"event_type":"standard","title":"Intro to Robotics","description":"Hands-on session building small robots with mentors.","category":"Technology","date":"2026-12-15T18:00:00Z","location":"HKU Main Building","address":"Pok Fu Lam Road, HKU","latitude":22.2831,"longitude":114.1371,"capacity":50,"price":0}'
+Body paid.json '{"event_type":"standard","title":"Wine Tasting Night","description":"An evening of wine tasting to support student travel grants.","category":"Social","date":"2026-12-20T19:00:00Z","location":"CUHK Student Union","capacity":30,"price":20}'
+Body fundraiser.json '{"event_type":"fundraiser","title":"Winter Charity Drive","description":"Collecting pledges to buy supplies for local shelters this winter.","category":"Charity","date":"2026-12-25T09:00:00Z","location":"Online + Campus","fundraiser_goal":5000}'
+Body bad-category.json '{"event_type":"standard","title":"Arts Night","description":"A description that is longer than twenty characters.","category":"Arts","date":"2026-12-15T18:00:00Z","location":"Somewhere","capacity":10,"price":0}'
+Body bad-goal.json '{"event_type":"fundraiser","title":"Tiny Goal","description":"A description that is longer than twenty characters.","category":"Charity","date":"2026-12-15T18:00:00Z","location":"Somewhere","fundraiser_goal":50}'
+
+# 401 (auth) and 403 (unverified) gates
+Post '/events' std.json $null 401 'no token'
+Post '/events' std.json 'garbage.token' 401 'garbage token'
+Post '/events' std.json $token 403 'unverified user'
+
+# stand in for POST /api/auth/verify (the middleware re-reads the user each request)
+docker compose exec mysql mysql -uroot -proot_password student_events -e "UPDATE users SET is_verified=1 WHERE email='eventtest@connect.hku.hk';"
+
+# 201 — created event comes back with the spec field names
+Post '/events' std.json $token 201 'standard free'          # total_tickets 50, available_tickets 50
+Post '/events' paid.json $token 201 'standard paid'         # price 20
+Post '/events' fundraiser.json $token 201 'fundraiser'      # fundraiser_goal 5000, available null (unlimited)
+
+# 400 — invalid payloads
+Post '/events' bad-category.json $token 400 "category 'Arts' is offered by the client but not seeded"
+Post '/events' bad-goal.json $token 400 'fundraiser goal below HK$100'
+
+# registration_deadline is computed: start date minus 24h (00:00), organizer = token user
+docker compose exec mysql mysql -uroot -proot_password student_events -e "SELECT id,event_type,organizer_id,event_date,registration_deadline,capacity,price,goal_amount FROM events WHERE organizer_id=(SELECT id FROM users WHERE email='eventtest@connect.hku.hk');"
+
+# the new events are immediately visible through the public endpoints
+curl.exe -s "$api/events?search=Robotics"          # 1 row
+curl.exe -s "$api/events?event_type=fundraiser"    # includes Winter Charity Drive
+
+# cleanup the test rows
+docker compose exec mysql mysql -uroot -proot_password student_events -e "DELETE FROM events WHERE organizer_id=(SELECT id FROM users WHERE email='eventtest@connect.hku.hk'); DELETE FROM users WHERE email='eventtest@connect.hku.hk';"
+```
+
+Expected: `401`/`401`/`403`, three `201`s, two `400`s, and DB rows where
+`registration_deadline` = `event_date` − 1 day at `00:00:00`, `organizer_id` matches
+the token user, fundraiser rows have `goal_amount` set and `capacity = 0`.
+
+## 10. Teardown
 
 ```powershell
 docker compose down        # keep data
