@@ -23,9 +23,19 @@ app.get('/api/health', (_request, response) => {
 app.get('/api/events', async (_request, response) => {
   try {
     const [events] = await pool.query(
-      `SELECT e.id, e.title, c.name AS category, e.event_date AS date, e.location
+      `SELECT e.id, e.title, e.description, c.name AS category,
+              e.event_date AS date, e.registration_deadline AS deadline, e.location,
+              e.event_type, e.capacity, e.price, e.goal_amount AS fundraiser_goal,
+              u.name AS organizer, u.university,
+              (SELECT COUNT(*)
+               FROM tickets t
+               WHERE t.event_id = e.id AND t.status = 'confirmed') AS booked,
+              (SELECT COALESCE(SUM(p.amount), 0)
+               FROM pledges p
+               WHERE p.event_id = e.id) AS raised_amount
        FROM events e
        JOIN categories c ON c.id = e.category_id
+       JOIN users u ON u.id = e.organizer_id
        WHERE e.status = 'published'
        ORDER BY e.event_date ASC`,
     )
