@@ -34,7 +34,14 @@ curl.exe -i http://localhost:5000/api/events/2     # 200, price 20, tickets.book
 curl.exe -i http://localhost:5000/api/events/4     # 200, fundraiser.raised 350 of goal 5000, 3 pledges
 curl.exe -i http://localhost:5000/api/events/999   # 404
 curl.exe -i http://localhost:5000/api/events/abc   # 404
+curl.exe -i http://localhost:5000/api/events/1e1   # 404 (strict integer ids only)
+curl.exe -i http://localhost:5000/api/nope         # 404 JSON {"error":"Not found"}
 ```
+
+List items and the detail object share one shape. Dates are UTC ISO strings, e.g.
+event 1 has `"date": "2026-10-03T10:00:00.000Z"` (18:00 Hong Kong time). Anonymous
+requests get `organizer` without `email`/`student_id`; send a Bearer token to see them.
+Malformed JSON bodies return `400 {"error":"Request body must be valid JSON"}`.
 
 ## 5. Status filter test
 
@@ -102,8 +109,9 @@ Expected: three `201`, one `409`, four `400`, and `hash_prefix = $2b$10` with `i
 ## 8. Events list filtering tests (`GET /api/events`)
 
 Seed data has 4 published events: 3 standard (2 free, 1 paid) + 1 fundraiser
-(goal 5000, raised 350). `capacity = 0` means unlimited, so nothing seeded is
-sold out.
+(goal 5000, raised 350). Seeded capacities are 120/200/40 with at most one
+ticket each, and the fundraiser has `capacity = 0` (unlimited), so nothing seeded
+is sold out.
 
 ```powershell
 $base = 'http://localhost:5000/api'
@@ -137,7 +145,8 @@ GetApi '/events?limit=51'
 
 To prove the `sold_out` filter hits, insert a throwaway capacity-1 event with one
 confirmed ticket, re-run `availability=sold_out` (expect 1 row,
-`available_tickets: 0`), then delete both rows again.
+`available_tickets: 0`), then delete the ticket first and the event second —
+`tickets → events` is `ON DELETE RESTRICT`, so deleting the event first fails with 1451.
 
 ## 9. Create event tests (`POST /api/events`, protected)
 
@@ -186,7 +195,7 @@ Post '/events' fundraiser.json $token 201 'fundraiser'      # fundraiser_goal 50
 Post '/events' bad-category.json $token 400 "category 'Arts' is offered by the client but not seeded"
 Post '/events' bad-goal.json $token 400 'fundraiser goal below HK$100'
 
-# registration_deadline is computed: start date minus 24h (00:00), organizer = token user
+# registration_deadline is computed: exactly 24h before the start (UTC), organizer = token user
 docker compose exec mysql mysql -uroot -proot_password student_events -e "SELECT id,event_type,organizer_id,event_date,registration_deadline,capacity,price,goal_amount FROM events WHERE organizer_id=(SELECT id FROM users WHERE email='eventtest@connect.hku.hk');"
 
 # the new events are immediately visible through the public endpoints
@@ -198,7 +207,8 @@ docker compose exec mysql mysql -uroot -proot_password student_events -e "DELETE
 ```
 
 Expected: `401`/`401`/`403`, three `201`s, two `400`s, and DB rows where
-`registration_deadline` = `event_date` − 1 day at `00:00:00`, `organizer_id` matches
+`event_date` keeps the time sent (`2026-12-15T18:00:00Z` → `2026-12-15 18:00:00`) and
+`registration_deadline` = `event_date` − 24h, `organizer_id` matches
 the token user, fundraiser rows have `goal_amount` set and `capacity = 0`.
 
 ## 10. Teardown

@@ -1,9 +1,8 @@
 import { apiGet } from './client.js'
 import { demoEvents } from '../data/demoEvents.js'
 
-// The list endpoint returns both the new filter field names (total_tickets,
-// available_tickets, ...) and the original capacity/booked names, so reads
-// here accept either shape.
+// Accepts the API event shape (GET /api/events and GET /api/events/:id return the
+// same object) as well as the local demo/draft events, which use the older names.
 export function normalizeEvent(raw) {
   return {
     id: String(raw.id),
@@ -13,19 +12,20 @@ export function normalizeEvent(raw) {
     category: raw.category ?? 'General',
     type: raw.event_type ?? raw.type ?? 'event',
     date: raw.date,
-    deadline: raw.deadline ?? raw.date,
+    deadline: raw.registration_deadline ?? raw.deadline ?? raw.date,
     location: raw.location,
     latitude: raw.latitude != null ? Number(raw.latitude) : null,
     longitude: raw.longitude != null ? Number(raw.longitude) : null,
-    university: raw.university ?? null,
-    capacity: Number(raw.capacity ?? raw.total_tickets ?? 0),
-    booked: Number(raw.booked ?? raw.booked_tickets ?? 0),
+    university: raw.university ?? raw.organizer?.university ?? null,
+    capacity: Number(raw.total_tickets ?? raw.capacity ?? 0),
+    booked: Number(raw.booked_tickets ?? raw.booked ?? 0),
     available: raw.available_tickets ?? null,
     price: Number(raw.price ?? 0),
     goal: Number(raw.fundraiser_goal ?? raw.goal ?? 0),
     raised: Number(raw.raised_amount ?? raw.raised ?? 0),
-    organizer: raw.organizer ?? 'Student organiser',
-    organizerEmail: raw.organizerEmail ?? null,
+    // The API sends organizer as an object; demo data uses a plain name string.
+    organizer: raw.organizer?.name ?? raw.organizer ?? 'Student organiser',
+    organizerEmail: raw.organizer?.email ?? raw.organizerEmail ?? null,
   }
 }
 

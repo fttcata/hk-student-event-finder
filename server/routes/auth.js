@@ -1,15 +1,10 @@
 import bcrypt from 'bcryptjs'
 import crypto from 'node:crypto'
 import { Router } from 'express'
-import jwt from 'jsonwebtoken'
 import { pool } from '../config/db.js'
+import { signToken } from '../config/jwt.js'
 import { requireAuth } from '../middleware/auth.js'
-
-if (!process.env.JWT_SECRET) {
-  throw new Error('JWT_SECRET is not set. Add it to server/.env (see .env.example).')
-}
-
-const JWT_SECRET = process.env.JWT_SECRET
+import { USER_COLUMNS, serializeUser } from '../utils/users.js'
 
 // Must match client/src/utils/universities.js — only these student email domains may sign up.
 const UNIVERSITY_DOMAINS = {
@@ -23,12 +18,6 @@ const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 function universityFromEmail(email) {
   const domain = email.split('@')[1]
   return Object.keys(UNIVERSITY_DOMAINS).find((code) => UNIVERSITY_DOMAINS[code].includes(domain)) ?? null
-}
-
-function signToken(user) {
-  return jwt.sign({ sub: user.id, role: user.role }, JWT_SECRET, {
-    expiresIn: process.env.JWT_EXPIRES_IN || '1d',
-  })
 }
 
 const router = Router()
@@ -67,7 +56,7 @@ router.post('/register', async (request, response) => {
       [name.trim(), normalizedEmail, passwordHash, studentId?.trim() || null, university, verificationCode],
     )
 
-    const user = {
+    const user = serializeUser({
       id: result.insertId,
       name: name.trim(),
       email: normalizedEmail,
@@ -75,20 +64,19 @@ router.post('/register', async (request, response) => {
       student_id: studentId?.trim() || null,
       university,
       is_verified: false,
-    }
+    })
 
     // The verification code stays server-side until the email service sends it.
     if (process.env.NODE_ENV !== 'production') {
       console.log(`Verification code for ${normalizedEmail}: ${verificationCode}`)
     }
 
-    response.status(201).json({ token: signToken(user), user })
+    return response.status(201).json({ token: signToken(user), user })
   } catch (error) {
     if (error.code === 'ER_DUP_ENTRY') {
       return response.status(409).json({ error: 'An account with this email already exists' })
     }
-    console.error(error)
-    response.status(500).json({ error: 'Unable to register' })
+    throw error
   }
 })
 
@@ -100,27 +88,16 @@ router.post('/login', async (request, response) => {
     return response.status(401).json({ error: 'Invalid email or password' })
   }
 
-  try {
-    const [[user]] = await pool.query('SELECT * FROM users WHERE email = ? LIMIT 1', [normalizedEmail])
-    if (!user || !(await bcrypt.compare(password, user.password_hash))) {
-      return response.status(401).json({ error: 'Invalid email or password' })
-    }
-
-    return response.json({
-      token: signToken(user),
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        studentId: user.student_id,
-        university: user.university,
-      },
-    })
-  } catch (error) {
-    console.error(error)
-    return response.status(500).json({ error: 'Unable to log in' })
+  const [[row]] = await pool.query(
+    `SELECT ${USER_COLUMNS}, password_hash FROM users WHERE email = ? LIMIT 1`,
+    [normalizedEmail],
+  )
+  if (!row || !(await bcrypt.compare(password, row.password_hash))) {
+    return response.status(401).json({ error: 'Invalid email or password' })
   }
+
+  const user = serializeUser(row)
+  return response.json({ token: signToken(user), user })
 })
 
 router.get('/me', requireAuth, (request, response) => {
