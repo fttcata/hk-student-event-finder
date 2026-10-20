@@ -32,7 +32,8 @@ CREATE TABLE IF NOT EXISTS events (
   address VARCHAR(200) NULL,
   latitude DECIMAL(10,7) NULL,
   longitude DECIMAL(10,7) NULL,
-  event_date DATE NOT NULL,
+  -- Start of the event in UTC (all DATETIME columns are UTC; the API returns ISO 'Z' strings).
+  event_date DATETIME NOT NULL,
   registration_deadline DATETIME NULL,
   event_type ENUM('standard', 'fundraiser') NOT NULL DEFAULT 'standard',
   capacity INT UNSIGNED NOT NULL DEFAULT 0,
@@ -43,12 +44,14 @@ CREATE TABLE IF NOT EXISTS events (
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
+  -- RESTRICT: removing a category or an organizer must not silently delete events
+  -- (and with them other students' tickets and pledges). Cancel events instead.
   CONSTRAINT fk_events_category
     FOREIGN KEY (category_id) REFERENCES categories (id)
-    ON DELETE CASCADE ON UPDATE CASCADE,
+    ON DELETE RESTRICT ON UPDATE CASCADE,
   CONSTRAINT fk_events_organizer
     FOREIGN KEY (organizer_id) REFERENCES users (id)
-    ON DELETE CASCADE ON UPDATE CASCADE,
+    ON DELETE RESTRICT ON UPDATE CASCADE,
   CONSTRAINT chk_events_goal
     CHECK (event_type <> 'fundraiser' OR goal_amount IS NOT NULL),
   INDEX idx_events_category (category_id),
@@ -71,12 +74,13 @@ CREATE TABLE IF NOT EXISTS tickets (
   PRIMARY KEY (id),
   UNIQUE KEY uq_tickets_user_event (user_id, event_id),
   UNIQUE KEY uq_tickets_reference (reference_code),
+  -- RESTRICT: tickets are receipts; they must outlive neither their event nor their holder by accident.
   CONSTRAINT fk_tickets_user
     FOREIGN KEY (user_id) REFERENCES users (id)
-    ON DELETE CASCADE ON UPDATE CASCADE,
+    ON DELETE RESTRICT ON UPDATE CASCADE,
   CONSTRAINT fk_tickets_event
     FOREIGN KEY (event_id) REFERENCES events (id)
-    ON DELETE CASCADE ON UPDATE CASCADE,
+    ON DELETE RESTRICT ON UPDATE CASCADE,
   INDEX idx_tickets_event (event_id)
 ) ENGINE=InnoDB;
 
@@ -89,12 +93,13 @@ CREATE TABLE IF NOT EXISTS pledges (
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   UNIQUE KEY uq_pledges_reference (reference_code),
+  -- RESTRICT: pledges are donation receipts, same rule as tickets.
   CONSTRAINT fk_pledges_event
     FOREIGN KEY (event_id) REFERENCES events (id)
-    ON DELETE CASCADE ON UPDATE CASCADE,
+    ON DELETE RESTRICT ON UPDATE CASCADE,
   CONSTRAINT fk_pledges_user
     FOREIGN KEY (user_id) REFERENCES users (id)
-    ON DELETE CASCADE ON UPDATE CASCADE,
+    ON DELETE RESTRICT ON UPDATE CASCADE,
   CONSTRAINT chk_pledges_amount CHECK (amount > 0),
   INDEX idx_pledges_event (event_id),
   INDEX idx_pledges_user (user_id)
@@ -183,23 +188,24 @@ INSERT INTO users (name, email, password_hash, role, student_id, university, is_
 SELECT 'Pending Student', 'pending@connect.hku.hk', '$2b$10$placeholderhashtokennotarealcredential0000000000000000000000', 'student', 'HK20260002', 'HKU', FALSE, 'VRF7K3M2Q9P4XN8D', NULL
 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM users WHERE email = 'pending@connect.hku.hk');
 
+-- Seed times are UTC: 18:00, 12:00, 14:00 and 09:00 Hong Kong time; deadlines are 23:59 HKT the day before.
 INSERT INTO events (title, description, category_id, organizer_id, location, address, latitude, longitude, event_date, registration_deadline, event_type, capacity, price, goal_amount, status)
-SELECT 'Campus Innovation Night', 'An evening of student demos and ideas.', c.id, u.id, 'Central Campus', 'Main Building, Pok Fu Lam Road, HKU', 22.2830000, 114.1370000, '2026-10-03', '2026-10-02 23:59:00', 'standard', 120, 0.00, NULL, 'published'
+SELECT 'Campus Innovation Night', 'An evening of student demos and ideas.', c.id, u.id, 'Central Campus', 'Main Building, Pok Fu Lam Road, HKU', 22.2830000, 114.1370000, '2026-10-03 10:00:00', '2026-10-02 15:59:00', 'standard', 120, 0.00, NULL, 'published'
 FROM categories c, users u WHERE c.name = 'Technology' AND u.email = 'organizer@hkstu.edu'
 AND NOT EXISTS (SELECT 1 FROM events e WHERE e.title = 'Campus Innovation Night');
 
 INSERT INTO events (title, description, category_id, organizer_id, location, address, latitude, longitude, event_date, registration_deadline, event_type, capacity, price, goal_amount, status)
-SELECT 'International Food Fair', 'Bring an appetite and a dish to share.', c.id, u.id, 'Student Union', 'Student Union Building, CUHK', 22.4190000, 114.2070000, '2026-10-08', '2026-10-07 23:59:00', 'standard', 200, 20.00, NULL, 'published'
+SELECT 'International Food Fair', 'Bring an appetite and a dish to share.', c.id, u.id, 'Student Union', 'Student Union Building, CUHK', 22.4190000, 114.2070000, '2026-10-08 04:00:00', '2026-10-07 15:59:00', 'standard', 200, 20.00, NULL, 'published'
 FROM categories c, users u WHERE c.name = 'Social' AND u.email = 'organizer@hkstu.edu'
 AND NOT EXISTS (SELECT 1 FROM events e WHERE e.title = 'International Food Fair');
 
 INSERT INTO events (title, description, category_id, organizer_id, location, address, latitude, longitude, event_date, registration_deadline, event_type, capacity, price, goal_amount, status)
-SELECT 'Design Portfolio Workshop', 'Practical feedback for your next portfolio review.', c.id, u.id, 'Media Lab', 'Innovation Tower, PolyU', 22.3070000, 114.1810000, '2026-10-12', '2026-10-11 23:59:00', 'standard', 40, 0.00, NULL, 'published'
+SELECT 'Design Portfolio Workshop', 'Practical feedback for your next portfolio review.', c.id, u.id, 'Media Lab', 'Innovation Tower, PolyU', 22.3070000, 114.1810000, '2026-10-12 06:00:00', '2026-10-11 15:59:00', 'standard', 40, 0.00, NULL, 'published'
 FROM categories c, users u WHERE c.name = 'Career' AND u.email = 'organizer@hkstu.edu'
 AND NOT EXISTS (SELECT 1 FROM events e WHERE e.title = 'Design Portfolio Workshop');
 
 INSERT INTO events (title, description, category_id, organizer_id, location, address, latitude, longitude, event_date, registration_deadline, event_type, capacity, price, goal_amount, status)
-SELECT 'Food Bank Drive 2026', 'Raise funds for the HK Food Bank. Every pledge counts.', c.id, u.id, 'Online + Campus Points', 'Campus Centre, HKU', 22.2840000, 114.1380000, '2026-11-15', '2026-11-14 23:59:00', 'fundraiser', 0, 0.00, 5000.00, 'published'
+SELECT 'Food Bank Drive 2026', 'Raise funds for the HK Food Bank. Every pledge counts.', c.id, u.id, 'Online + Campus Points', 'Campus Centre, HKU', 22.2840000, 114.1380000, '2026-11-15 01:00:00', '2026-11-14 15:59:00', 'fundraiser', 0, 0.00, 5000.00, 'published'
 FROM categories c, users u WHERE c.name = 'Charity' AND u.email = 'organizer@hkstu.edu'
 AND NOT EXISTS (SELECT 1 FROM events e WHERE e.title = 'Food Bank Drive 2026');
 

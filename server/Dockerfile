@@ -9,6 +9,7 @@ COPY src ./src
 COPY config ./config
 COPY routes ./routes
 COPY middleware ./middleware
+COPY utils ./utils
 
 ENV NODE_ENV=production
 ENV PORT=5000
