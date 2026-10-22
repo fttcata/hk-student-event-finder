@@ -35,3 +35,7 @@ Invoke-RestMethod http://localhost:5000/api/events
 ```
 
 The database credentials in `server/.env.example` match `docker-compose.yml` for local development only. Do not use them in production.
+
+Email receipts: set `SMTP_USER` / `SMTP_PASSWORD` in `server/.env` to your Mailtrap sandbox credentials
+(Mailtrap → Sandboxes → SMTP). The Docker server reads its `SMTP_*` settings from that file too, so run
+`docker compose up -d server` after changing it. On startup the server logs `SMTP ready` or why SMTP failed.

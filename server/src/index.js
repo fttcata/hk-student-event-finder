@@ -4,10 +4,12 @@ import cors from 'cors'
 import express from 'express'
 import helmet from 'helmet'
 import { pool } from '../config/db.js'
+import { reportSmtpStatus } from '../config/email.js'
 import { errorHandler, notFound } from '../middleware/errors.js'
 import authRoutes from '../routes/auth.js'
 import categoryRoutes from '../routes/categories.js'
 import eventRoutes from '../routes/events.js'
+import userRoutes from '../routes/users.js'
 
 const app = express()
 const port = Number(process.env.PORT || 5000)
@@ -32,10 +34,12 @@ app.get('/api/health', async (_request, response) => {
 app.use('/api/auth', authRoutes)
 app.use('/api/events', eventRoutes)
 app.use('/api/categories', categoryRoutes)
+app.use('/api/users', userRoutes)
 
 app.use('/api', notFound)
 app.use(errorHandler)
 
 app.listen(port, () => {
   console.log(`API listening at http://localhost:${port}`)
+  reportSmtpStatus()
 })
