@@ -15,6 +15,9 @@ const UNIVERSITY_DOMAINS = {
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
+// bcrypt only hashes the first 72 bytes, so longer passwords are refused rather than truncated.
+const MAX_PASSWORD_BYTES = 72
+
 function universityFromEmail(email) {
   const domain = email.split('@')[1]
   return Object.keys(UNIVERSITY_DOMAINS).find((code) => UNIVERSITY_DOMAINS[code].includes(domain)) ?? null
@@ -32,7 +35,8 @@ router.post('/register', async (request, response) => {
   if (name.trim().length > 120) {
     return response.status(400).json({ error: 'Name must be 120 characters or fewer' })
   }
-  if (!EMAIL_PATTERN.test(normalizedEmail)) {
+  // users.email is VARCHAR(160).
+  if (!EMAIL_PATTERN.test(normalizedEmail) || normalizedEmail.length > 160) {
     return response.status(400).json({ error: 'Enter a valid email address' })
   }
   const university = universityFromEmail(normalizedEmail)
@@ -41,6 +45,9 @@ router.post('/register', async (request, response) => {
   }
   if (typeof password !== 'string' || password.length < 8) {
     return response.status(400).json({ error: 'Password must be at least 8 characters' })
+  }
+  if (Buffer.byteLength(password, 'utf8') > MAX_PASSWORD_BYTES) {
+    return response.status(400).json({ error: `Password must be ${MAX_PASSWORD_BYTES} bytes or fewer` })
   }
   if (studentId != null && (typeof studentId !== 'string' || studentId.length > 40)) {
     return response.status(400).json({ error: 'Student ID must be text of 40 characters or fewer' })
@@ -84,7 +91,9 @@ router.post('/login', async (request, response) => {
   const { email, password } = request.body ?? {}
   const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : ''
 
-  if (!normalizedEmail || typeof password !== 'string') {
+  // Over 72 bytes can never be a real password (register rejects it), and bcrypt would compare
+  // only the first 72 bytes, so "<password>anything" would otherwise log in.
+  if (!normalizedEmail || typeof password !== 'string' || Buffer.byteLength(password, 'utf8') > MAX_PASSWORD_BYTES) {
     return response.status(401).json({ error: 'Invalid email or password' })
   }
 
