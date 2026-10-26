@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import CountdownTimer from '../components/CountdownTimer.jsx'
+import EventChatRoom from '../components/EventChatRoom.jsx'
 import FundraiserDonateModal from '../components/FundraiserDonateModal.jsx'
 import MapEmbed from '../components/MapEmbed.jsx'
 import ProgressBar from '../components/ProgressBar.jsx'
@@ -246,7 +247,7 @@ export default function EventDetailPage() {
   const { id } = useParams()
   const navigate = useNavigate()
   const { user } = useAuth()
-  const { bookmarks, toggleBookmark } = useActivity()
+  const { bookmarks, bookings, toggleBookmark } = useActivity()
   const { events, loading } = useEvents()
 
   const event = events.find((e) => e.id === id)
@@ -295,6 +296,13 @@ export default function EventDetailPage() {
           <p className="mt-8 max-w-2xl leading-relaxed whitespace-pre-line text-ink/80">
             {event.description || 'The organiser has not added a description yet.'}
           </p>
+
+          {kind !== 'fundraiser' && (
+            <EventChatRoom
+              event={event}
+              hasTicket={bookings.some((booking) => booking.eventId === event.id)}
+            />
+          )}
 
           <section className="panel mt-10 space-y-4" aria-labelledby="event-location-heading">
             <div>
