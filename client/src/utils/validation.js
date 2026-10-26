@@ -29,8 +29,8 @@ export function validateEventForm(form, bookedSeats = 0) {
   if (!form.date) errors.date = 'Pick a date and time.'
   else if (new Date(form.date) <= now) errors.date = 'The event must be in the future.'
 
-  if (!form.deadline) errors.deadline = 'Pick a registration deadline.'
-  else if (form.date && new Date(form.deadline) > new Date(form.date)) {
+  if (form.type === 'fundraiser' && !form.deadline) errors.deadline = 'Pick a campaign end date.'
+  else if (form.type === 'fundraiser' && form.date && new Date(form.deadline) > new Date(form.date)) {
     errors.deadline = 'The deadline must be before the event starts.'
   }
 

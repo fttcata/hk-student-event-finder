@@ -4,7 +4,7 @@ import Field from '../components/Field.jsx'
 import MapEmbed from '../components/MapEmbed.jsx'
 import { useActivity } from '../context/ActivityContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
-import { toDateTimeInput } from '../utils/format.js'
+import { getRegistrationCutoff, toDateTimeInput } from '../utils/format.js'
 import { validateEventForm } from '../utils/validation.js'
 
 const CATEGORIES = ['Technology', 'Social', 'Career', 'Sports', 'Arts', 'Charity']
@@ -66,7 +66,9 @@ function EventForm({ existing }) {
       description: form.description.trim(),
       category: isFundraiser ? 'Charity' : form.category,
       date: new Date(form.date).toISOString(),
-      deadline: new Date(form.deadline).toISOString(),
+      deadline: isFundraiser
+        ? new Date(form.deadline).toISOString()
+        : new Date(getRegistrationCutoff(form.date)).toISOString(),
       location: form.location.trim(),
       capacity: isFundraiser ? 0 : Number(form.capacity),
       price: isFundraiser ? 0 : Number(form.price),
@@ -133,16 +135,22 @@ function EventForm({ existing }) {
               onChange={handleChange}
             />
           </Field>
-          <Field label={isFundraiser ? 'Campaign ends' : 'Registration deadline'} htmlFor="deadline" error={errors.deadline}>
-            <input
-              id="deadline"
-              name="deadline"
-              type="datetime-local"
-              className={inputClass('deadline')}
-              value={form.deadline}
-              onChange={handleChange}
-            />
-          </Field>
+          {isFundraiser ? (
+            <Field label="Campaign ends" htmlFor="deadline" error={errors.deadline}>
+              <input
+                id="deadline"
+                name="deadline"
+                type="datetime-local"
+                className={inputClass('deadline')}
+                value={form.deadline}
+                onChange={handleChange}
+              />
+            </Field>
+          ) : (
+            <p className="self-end pb-2 text-sm text-muted">
+              Ticket registration closes automatically 24 hours before the event starts.
+            </p>
+          )}
         </div>
 
         {isFundraiser ? (

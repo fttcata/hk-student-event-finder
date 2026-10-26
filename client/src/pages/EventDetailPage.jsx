@@ -1,13 +1,22 @@
 import { useState } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
+import CountdownTimer from '../components/CountdownTimer.jsx'
 import MapEmbed from '../components/MapEmbed.jsx'
 import ProgressBar from '../components/ProgressBar.jsx'
 import Receipt from '../components/Receipt.jsx'
+import TicketCounter from '../components/TicketCounter.jsx'
 import { useActivity } from '../context/ActivityContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { useEvents } from '../hooks/useEvents.js'
 import { useNow } from '../hooks/useNow.js'
-import { formatDateTime, formatMoney, formatTimeLeft, getEventKind, KIND_LABELS } from '../utils/format.js'
+import {
+  formatDateTime,
+  formatMoney,
+  formatTimeLeft,
+  getEventKind,
+  getRegistrationCutoff,
+  KIND_LABELS,
+} from '../utils/format.js'
 import NotFoundPage from './NotFoundPage.jsx'
 
 const QUICK_AMOUNTS = [20, 50, 100, 200]
@@ -35,20 +44,23 @@ function Deadline({ deadline, now }) {
 function TicketPanel({ event }) {
   const { user } = useAuth()
   const { bookTicket } = useActivity()
-  const now = useNow()
+  const now = useNow(1000)
   const [quantity, setQuantity] = useState(1)
   const [step, setStep] = useState('select') // select → checkout (paid only) → done
   const [receipt, setReceipt] = useState(null)
   const [error, setError] = useState('')
 
   const hasLimit = event.capacity > 0
-  const seatsLeft = hasLimit ? event.capacity - event.booked : Infinity
-  const isFull = seatsLeft <= 0
-  const isClosed = new Date(event.deadline) <= now
+  const seatsLeft = hasLimit ? Math.max(0, event.capacity - event.booked) : Infinity
+  const isFull = hasLimit && seatsLeft === 0
+  const registrationCutoff = getRegistrationCutoff(event.date)
+  const isClosed = !Number.isFinite(registrationCutoff) || now >= registrationCutoff
+  const canBook = !isFull && !isClosed
   const isPaid = event.price > 0
   const total = event.price * quantity
 
   function confirmBooking() {
+    if (!canBook) return
     try {
       setReceipt(bookTicket(event, quantity))
       setStep('done')
@@ -76,10 +88,9 @@ function TicketPanel({ event }) {
   return (
     <div className="panel space-y-5">
       {hasLimit && (
-        <span className={`badge ${isFull ? 'bg-accent/10 text-accent' : 'bg-sage'}`}>
-          {Math.max(0, seatsLeft)} / {event.capacity} Tickets Remaining
-        </span>
+        <TicketCounter available={seatsLeft} capacity={event.capacity} soldOut={isFull} />
       )}
+      <CountdownTimer targetTime={registrationCutoff} now={now} />
       <div>
         <p className="text-xs text-muted">Ticket price</p>
         <p className="display text-4xl">{formatMoney(event.price)}</p>
@@ -89,11 +100,10 @@ function TicketPanel({ event }) {
         <div className="space-y-2">
           <ProgressBar value={event.booked} max={event.capacity} />
           <p className="text-sm">
-            {isFull ? 'Sold out' : `${Math.max(0, seatsLeft)} of ${event.capacity} seats left`}
+            {isFull ? 'Sold out' : `${seatsLeft} of ${event.capacity} seats left`}
           </p>
         </div>
       )}
-      <Deadline deadline={event.deadline} now={now} />
 
       {step === 'checkout' ? (
         <div className="space-y-4 border-t border-line pt-5">
@@ -111,12 +121,17 @@ function TicketPanel({ event }) {
             <button type="button" className="btn btn-outline flex-1" onClick={() => setStep('select')}>
               Back
             </button>
-            <button type="button" className="btn btn-accent flex-1" onClick={confirmBooking}>
+            <button type="button" className="btn btn-accent flex-1" onClick={confirmBooking} disabled={!canBook}>
               Pay {formatMoney(total)}
             </button>
           </div>
+          {!canBook && (
+            <p className="text-sm text-accent">
+              {isFull ? 'This event is sold out.' : 'Registration has closed.'}
+            </p>
+          )}
         </div>
-      ) : isFull || isClosed ? (
+      ) : !canBook ? (
         <button type="button" className="btn btn-dark w-full" disabled>
           {isFull ? 'Sold out' : 'Registration closed'}
         </button>

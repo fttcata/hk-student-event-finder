@@ -9,6 +9,10 @@ export function getEventKind(event) {
 
 export const KIND_LABELS = { free: 'Free', paid: 'Paid', fundraiser: 'Fundraiser' }
 
+export function getRegistrationCutoff(eventDate) {
+  return new Date(eventDate).getTime() - DAY
+}
+
 export function formatDate(value) {
   return new Date(value).toLocaleDateString('en-HK', { weekday: 'short', day: 'numeric', month: 'short' })
 }

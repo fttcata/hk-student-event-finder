@@ -1,7 +1,7 @@
 import { createContext, useContext } from 'react'
 import { useAuth } from './AuthContext.jsx'
 import { usePersistentState } from '../hooks/usePersistentState.js'
-import { createReference } from '../utils/format.js'
+import { createReference, getRegistrationCutoff } from '../utils/format.js'
 
 const ActivityContext = createContext(null)
 
@@ -18,6 +18,11 @@ export function ActivityProvider({ children }) {
 
   function bookTicket(event, quantity) {
     const seatsLeft = event.capacity > 0 ? event.capacity - event.booked : Infinity
+    const registrationCutoff = getRegistrationCutoff(event.date)
+    if (!Number.isFinite(registrationCutoff) || Date.now() >= registrationCutoff) {
+      throw new Error('Registration has closed.')
+    }
+    if (seatsLeft <= 0) throw new Error('Sorry, this event is sold out.')
     if (quantity > seatsLeft) throw new Error('Sorry, there are not enough seats left.')
 
     const booking = {
