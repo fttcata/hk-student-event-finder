@@ -25,8 +25,18 @@ export function ActivityProvider({ children }) {
     if (seatsLeft <= 0) throw new Error('Sorry, this event is sold out.')
     if (quantity > seatsLeft) throw new Error('Sorry, there are not enough seats left.')
 
+    const usedCodes = new Set(bookings.flatMap((booking) => booking.ticketCodes ?? [booking.reference]))
+    const ticketCodes = []
+    while (ticketCodes.length < quantity) {
+      const code = createReference('TKT')
+      if (!usedCodes.has(code)) {
+        usedCodes.add(code)
+        ticketCodes.push(code)
+      }
+    }
     const booking = {
-      reference: createReference('TKT'),
+      reference: ticketCodes[0],
+      ticketCodes,
       eventId: event.id,
       title: event.title,
       date: event.date,

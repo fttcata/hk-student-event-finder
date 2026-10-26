@@ -1,8 +1,11 @@
 import { Link, useNavigate } from 'react-router-dom'
+import TicketCard from '../components/TicketCard.jsx'
+import { useActivity } from '../context/ActivityContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 
 export default function Profile() {
   const { user, logout } = useAuth()
+  const { bookings } = useActivity()
   const navigate = useNavigate()
 
   function handleLogout() {
@@ -54,6 +57,30 @@ export default function Profile() {
               </div>
             ))}
           </dl>
+        </section>
+
+        <section className="space-y-4 lg:col-span-2" aria-labelledby="my-tickets-heading">
+          <div className="flex items-end justify-between gap-4">
+            <div>
+              <p className="eyebrow">Your bookings</p>
+              <h2 id="my-tickets-heading" className="display mt-2 text-3xl">My tickets.</h2>
+            </div>
+            <span className="badge">{bookings.reduce((total, booking) => total + booking.quantity, 0)} tickets</span>
+          </div>
+          {bookings.length === 0 ? (
+            <div className="panel">
+              <p className="text-sm text-muted">Your event tickets and their unique barcodes will appear here after booking.</p>
+              <Link to="/events" className="btn btn-dark mt-4">Find an event</Link>
+            </div>
+          ) : (
+            <ul className="space-y-3">
+              {bookings.map((booking) => (
+                <li key={booking.reference}>
+                  <TicketCard booking={booking} />
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
       </div>
     </main>

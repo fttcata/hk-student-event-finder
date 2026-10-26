@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import CountdownTimer from '../components/CountdownTimer.jsx'
+import FundraiserDonateModal from '../components/FundraiserDonateModal.jsx'
 import MapEmbed from '../components/MapEmbed.jsx'
 import ProgressBar from '../components/ProgressBar.jsx'
 import Receipt from '../components/Receipt.jsx'
@@ -18,8 +19,6 @@ import {
   KIND_LABELS,
 } from '../utils/format.js'
 import NotFoundPage from './NotFoundPage.jsx'
-
-const QUICK_AMOUNTS = [20, 50, 100, 200]
 
 // Shown instead of the booking button when the visitor is not logged in.
 function LoginPrompt({ action }) {
@@ -173,20 +172,17 @@ function PledgePanel({ event }) {
   const { user } = useAuth()
   const { pledge } = useActivity()
   const now = useNow()
-  const [amount, setAmount] = useState('50')
   const [receipt, setReceipt] = useState(null)
-  const [error, setError] = useState('')
+  const [isModalOpen, setIsModalOpen] = useState(false)
 
   const isClosed = new Date(event.deadline) <= now
   const percent = event.goal > 0 ? Math.round((event.raised / event.goal) * 100) : 0
 
-  function handleSubmit(e) {
-    e.preventDefault()
-    const value = Number(amount)
-    if (!Number.isInteger(value) || value < 10) return setError('Pledges must be a whole amount of at least HK$10.')
-    if (value > 100000) return setError('Pledges are capped at HK$100,000.')
-    setError('')
-    setReceipt(pledge(event, value))
+  function handleDonate(amount) {
+    const donation = pledge(event, amount)
+    setReceipt(donation)
+    setIsModalOpen(false)
+    return donation
   }
 
   if (receipt) {
@@ -205,63 +201,44 @@ function PledgePanel({ event }) {
   }
 
   return (
-    <form className="panel space-y-5" onSubmit={handleSubmit} noValidate>
-      <div>
-        <p className="eyebrow">Cause / pledge</p>
-        <p className="mt-2 text-sm leading-relaxed text-ink/80">
-          {event.cause || event.description || 'Support this campaign by making a pledge.'}
-        </p>
-      </div>
-      <div>
-        <p className="text-xs text-muted">Raised so far</p>
-        <p className="display text-4xl">{formatMoney(event.raised)}</p>
-        <p className="mt-1 text-sm text-muted">
-          of {formatMoney(event.goal)} goal · {percent}%
-        </p>
-      </div>
-      <ProgressBar value={event.raised} max={event.goal} barClassName="bg-teal" />
-      <Deadline deadline={event.deadline} now={now} />
-
-      {isClosed ? (
-        <button type="button" className="btn btn-dark w-full" disabled>
-          Campaign closed
-        </button>
-      ) : !user ? (
-        <LoginPrompt action="pledge" />
-      ) : (
-        <div className="space-y-3">
-          <div className="grid grid-cols-4 gap-2">
-            {QUICK_AMOUNTS.map((value) => (
-              <button
-                key={value}
-                type="button"
-                onClick={() => setAmount(String(value))}
-                className={`rounded-sm border py-2 text-sm ${
-                  amount === String(value) ? 'border-ink bg-ink text-paper' : 'border-line hover:border-ink'
-                }`}
-              >
-                ${value}
-              </button>
-            ))}
-          </div>
-          <label className="block text-sm">
-            <span className="text-muted">Custom amount (HK$)</span>
-            <input
-              type="number"
-              min="10"
-              step="1"
-              className={`input mt-1 ${error ? 'input-error' : ''}`}
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-            />
-          </label>
-          {error && <p className="text-xs text-accent">{error}</p>}
-          <button type="submit" className="btn btn-accent w-full">
-            Pledge {amount && Number(amount) > 0 ? formatMoney(amount) : ''}
-          </button>
+    <>
+      <div className="panel space-y-5">
+        <div>
+          <p className="eyebrow">Cause / pledge</p>
+          <p className="mt-2 text-sm leading-relaxed text-ink/80">
+            {event.cause || event.description || 'Support this campaign by making a pledge.'}
+          </p>
         </div>
+        <div>
+          <p className="text-xs text-muted">Raised so far</p>
+          <p className="display text-4xl">{formatMoney(event.raised)}</p>
+          <p className="mt-1 text-sm text-muted">
+            of {formatMoney(event.goal)} goal · {percent}%
+          </p>
+        </div>
+        <ProgressBar value={event.raised} max={event.goal} barClassName="bg-teal" />
+        <Deadline deadline={event.deadline} now={now} />
+
+        {isClosed ? (
+          <button type="button" className="btn btn-dark w-full" disabled>
+            Campaign closed
+          </button>
+        ) : !user ? (
+          <LoginPrompt action="pledge" />
+        ) : (
+          <button type="button" className="btn btn-accent w-full" onClick={() => setIsModalOpen(true)}>
+            Support / Donate
+          </button>
+        )}
+      </div>
+      {isModalOpen && (
+        <FundraiserDonateModal
+          fundraiserTitle={event.title}
+          onClose={() => setIsModalOpen(false)}
+          onDonate={handleDonate}
+        />
       )}
-    </form>
+    </>
   )
 }
 
