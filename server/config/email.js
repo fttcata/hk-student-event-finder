@@ -61,3 +61,29 @@ export async function sendDonationReceipt({ user, event, pledge }) {
     ].join('\n'),
   })
 }
+
+// Throws when SMTP is not configured or the send fails; callers record the outcome in email_log.
+export async function sendTicketReceipt({ user, event, ticket }) {
+  if (!transporter) throw new Error('SMTP is not configured')
+
+  const amount = `HK$${ticket.amount_paid.toFixed(2)}`
+  return transporter.sendMail({
+    from: FROM,
+    to: user.email,
+    subject: `Ticket confirmed ${ticket.reference_code} — ${event.title}`,
+    text: [
+      `Hi ${user.name},`,
+      '',
+      `Your ticket for "${event.title}" is confirmed.`,
+      '',
+      `Ticket code: ${ticket.reference_code}`,
+      `Type: ${ticket.type}`,
+      `Date: ${new Date(event.date).toISOString()}`,
+      `Location: ${event.location}`,
+      `Amount paid: ${amount}`,
+      '',
+      'Show this email (or the ticket code) at the entrance.',
+      '— Campus Hub',
+    ].join('\n'),
+  })
+}
