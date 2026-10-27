@@ -217,6 +217,24 @@ router.get('/:id', optionalAuth, async (request, response) => {
   return response.status(200).json({ event })
 })
 
+router.get('/:id/messages', optionalAuth, async (request, response) => {
+  const eventId = parseEventId(request.params.id)
+  if (eventId === null) return response.status(404).json(EVENT_NOT_FOUND)
+  const [[event]] = await pool.query('SELECT event_date FROM events WHERE id = ? AND status = \'published\'', [eventId])
+  if (!event) return response.status(404).json(EVENT_NOT_FOUND)
+  const now = new Date()
+  const eventDate = new Date(event.event_date)
+  const opensAt = new Date(eventDate.getTime() - 6 * 60 * 60 * 1000)
+  if (now < opensAt || now >= eventDate) return response.json({ messages: [] })
+  const [messages] = await pool.query(
+    `SELECT m.id, m.content, m.created_at, u.name AS user_name
+     FROM chat_messages m JOIN users u ON u.id = m.user_id
+     WHERE m.event_id = ? ORDER BY m.created_at ASC LIMIT 100`,
+    [eventId],
+  )
+  return response.json({ messages })
+})
+
 // Upper bounds keep values inside their columns (DECIMAL(8,2), DECIMAL(10,2), INT UNSIGNED, TEXT),
 // so oversized input is a 400 instead of a MySQL out-of-range 500.
 const MAX_PRICE = 10000

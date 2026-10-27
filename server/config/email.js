@@ -1,4 +1,5 @@
 import nodemailer from 'nodemailer'
+import { generateTicketEmailHTML } from '../utils/emailTemplates.js'
 
 const smtpConfigured = Boolean(
   process.env.SMTP_HOST && process.env.SMTP_PORT && process.env.SMTP_USER && process.env.SMTP_PASSWORD,
@@ -66,11 +67,12 @@ export async function sendDonationReceipt({ user, event, pledge }) {
 export async function sendTicketReceipt({ user, event, ticket }) {
   if (!transporter) throw new Error('SMTP is not configured')
 
-  const amount = `HK$${ticket.amount_paid.toFixed(2)}`
+  const amount = `HK$${Number(ticket.amount_paid).toFixed(2)}`
   return transporter.sendMail({
     from: FROM,
     to: user.email,
     subject: `Ticket confirmed ${ticket.reference_code} — ${event.title}`,
+    html: generateTicketEmailHTML(user.name, event.title, ticket.reference_code, ticket.amount_paid, new Date(event.date).toISOString()),
     text: [
       `Hi ${user.name},`,
       '',

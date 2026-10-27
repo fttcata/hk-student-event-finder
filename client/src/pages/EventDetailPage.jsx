@@ -3,6 +3,11 @@ import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import MapEmbed from '../components/MapEmbed.jsx'
 import ProgressBar from '../components/ProgressBar.jsx'
 import Receipt from '../components/Receipt.jsx'
+import CountdownTimer from '../components/CountdownTimer.jsx'
+import TicketCounter from '../components/TicketCounter.jsx'
+import TicketCheckoutModal from '../components/TicketCheckoutModal.jsx'
+import EventChatRoom from '../components/EventChatRoom.jsx'
+import FundraiserDonateModal from '../components/FundraiserDonateModal.jsx'
 import { useActivity } from '../context/ActivityContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { useEvents } from '../hooks/useEvents.js'
@@ -40,6 +45,7 @@ function TicketPanel({ event }) {
   const [step, setStep] = useState('select') // select → checkout (paid only) → done
   const [receipt, setReceipt] = useState(null)
   const [error, setError] = useState('')
+  const [checkoutOpen, setCheckoutOpen] = useState(false)
 
   const hasLimit = event.capacity > 0
   const seatsLeft = hasLimit ? event.capacity - event.booked : Infinity
@@ -60,7 +66,7 @@ function TicketPanel({ event }) {
   if (step === 'done') {
     return (
       <Receipt
-        heading={isPaid ? 'Payment received' : 'Ticket claimed'}
+        heading="Confirmation email sent!"
         reference={receipt.reference}
         email={user.email}
         rows={[
@@ -94,6 +100,7 @@ function TicketPanel({ event }) {
         </div>
       )}
       <Deadline deadline={event.deadline} now={now} />
+      <CountdownTimer target={event.deadline} />
 
       {step === 'checkout' ? (
         <div className="space-y-4 border-t border-line pt-5">
@@ -126,29 +133,19 @@ function TicketPanel({ event }) {
         <div className="space-y-3">
           <label className="flex items-center justify-between text-sm">
             Tickets
-            <select
-              className="input w-24"
-              value={quantity}
-              onChange={(e) => setQuantity(Number(e.target.value))}
-            >
-              {/* Never offer more tickets than there are seats left (max 4 per student). */}
-              {Array.from({ length: Math.min(4, seatsLeft) }, (_, i) => i + 1).map((n) => (
-                <option key={n} value={n}>
-                  {n}
-                </option>
-              ))}
-            </select>
+            <TicketCounter available={seatsLeft} total={event.capacity} value={quantity} onChange={setQuantity} />
           </label>
           <button
             type="button"
             className="btn btn-dark w-full"
-            onClick={() => (isPaid ? setStep('checkout') : confirmBooking())}
+            onClick={() => setCheckoutOpen(true)}
           >
             {isPaid ? `Checkout · ${formatMoney(total)}` : 'Claim free ticket'}
           </button>
         </div>
       )}
       {error && <p className="text-sm text-accent">{error}</p>}
+      {checkoutOpen && <TicketCheckoutModal event={event} quantity={quantity} onClose={() => setCheckoutOpen(false)} onSuccess={(result) => { setCheckoutOpen(false); setReceipt({ reference: result.ticket.reference_code, quantity, total: Number(result.ticket.amount_paid) * quantity }); setStep('done') }} />}
     </div>
   )
 }
@@ -161,6 +158,7 @@ function PledgePanel({ event }) {
   const [amount, setAmount] = useState('50')
   const [receipt, setReceipt] = useState(null)
   const [error, setError] = useState('')
+  const [donateOpen, setDonateOpen] = useState(false)
 
   const isClosed = new Date(event.deadline) <= now
   const percent = event.goal > 0 ? Math.round((event.raised / event.goal) * 100) : 0
@@ -205,6 +203,7 @@ function PledgePanel({ event }) {
         </p>
       </div>
       <ProgressBar value={event.raised} max={event.goal} barClassName="bg-teal" />
+      {user && !isClosed && <button type="button" className="btn btn-accent w-full" onClick={() => setDonateOpen(true)}>Open donation checkout</button>}
       <Deadline deadline={event.deadline} now={now} />
 
       {isClosed ? (
@@ -246,6 +245,7 @@ function PledgePanel({ event }) {
           </button>
         </div>
       )}
+      {donateOpen && <FundraiserDonateModal event={event} onClose={() => setDonateOpen(false)} onSuccess={(result) => { setDonateOpen(false); setReceipt({ reference: result.pledge.reference_code, amount: result.pledge.amount }) }} />}
     </form>
   )
 }
@@ -310,6 +310,7 @@ export default function EventDetailPage() {
               <p className="mt-2 font-medium">{event.location}</p>
             </div>
             <MapEmbed query={event.location} className="h-72" />
+            <EventChatRoom event={event} />
           </section>
         </section>
 

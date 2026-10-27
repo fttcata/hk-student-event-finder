@@ -109,6 +109,20 @@ router.post('/login', async (request, response) => {
   return response.json({ token: signToken(user), user })
 })
 
+router.post('/verify', async (request, response) => {
+  const email = typeof request.body?.email === 'string' ? request.body.email.trim().toLowerCase() : ''
+  const code = typeof request.body?.code === 'string' ? request.body.code.trim().toUpperCase() : ''
+  if (!email || !code) return response.status(400).json({ error: 'Email and verification code are required' })
+
+  const [result] = await pool.query(
+    `UPDATE users SET is_verified = TRUE, verification_code = NULL, verified_at = CURRENT_TIMESTAMP
+     WHERE email = ? AND verification_code = ? AND is_verified = FALSE`,
+    [email, code],
+  )
+  if (result.affectedRows !== 1) return response.status(400).json({ error: 'Invalid or expired verification code' })
+  return response.json({ verified: true })
+})
+
 router.get('/me', requireAuth, (request, response) => {
   response.json({ user: request.user })
 })

@@ -1,4 +1,4 @@
-import { apiGet } from './client.js'
+import { apiGet, apiPost } from './client.js'
 import { demoEvents } from '../data/demoEvents.js'
 
 // Accepts the API event shape (GET /api/events and GET /api/events/:id return the
@@ -52,4 +52,13 @@ export async function fetchEvents(filters = {}) {
   } catch {
     return { events: demoEvents.map(normalizeEvent), source: 'demo' }
   }
+}
+
+export async function fetchMyTickets() {
+  const data = await apiGet('/users/me/tickets')
+  return data.tickets
+}
+
+export async function createEvent(payload) {
+  return apiPost('/events', payload)
 }

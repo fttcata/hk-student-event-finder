@@ -1,4 +1,4 @@
-import { createContext, useContext } from 'react'
+import { createContext, useContext, useEffect } from 'react'
 import { usePersistentState } from '../hooks/usePersistentState.js'
 import { loginUser, registerUser } from '../api/auth.js'
 import { validatePassword, validateStudentEmail } from '../utils/validation.js'
@@ -9,6 +9,15 @@ const AuthContext = createContext(null)
 export function AuthProvider({ children }) {
   const [user, setUser] = usePersistentState('campushub:user', null)
   const [token, setToken] = usePersistentState('campushub:token', '')
+
+  useEffect(() => {
+    function handleSessionExpired() {
+      setToken('')
+      setUser(null)
+    }
+    window.addEventListener('campushub:session-expired', handleSessionExpired)
+    return () => window.removeEventListener('campushub:session-expired', handleSessionExpired)
+  }, [setToken, setUser])
 
   async function register({ name, email, password }) {
     const error = (!name.trim() && 'Name is required.') || validateStudentEmail(email) || validatePassword(password)

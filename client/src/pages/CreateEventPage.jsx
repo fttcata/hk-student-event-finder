@@ -6,6 +6,7 @@ import { useActivity } from '../context/ActivityContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { toDateTimeInput } from '../utils/format.js'
 import { validateEventForm } from '../utils/validation.js'
+import { createEvent } from '../api/events.js'
 
 const CATEGORIES = ['Technology', 'Social', 'Career', 'Sports', 'Arts', 'Charity']
 
@@ -53,13 +54,13 @@ function EventForm({ existing }) {
     setErrors({ ...errors, [e.target.name]: '' })
   }
 
-  function handleSubmit(e) {
+  async function handleSubmit(e) {
     e.preventDefault()
     const nextErrors = validateEventForm(form, existing?.booked ?? 0)
     setErrors(nextErrors)
     if (Object.keys(nextErrors).length > 0) return
 
-    const saved = saveEvent({
+    const eventData = {
       ...(existing && { id: existing.id }),
       type: form.type,
       title: form.title.trim(),
@@ -71,7 +72,22 @@ function EventForm({ existing }) {
       capacity: isFundraiser ? 0 : Number(form.capacity),
       price: isFundraiser ? 0 : Number(form.price),
       goal: isFundraiser ? Number(form.goal) : 0,
-    })
+    }
+    if (!existing) {
+      try {
+        const response = await createEvent({
+          ...eventData,
+          event_type: form.type === 'fundraiser' ? 'fundraiser' : 'standard',
+          total_tickets: eventData.capacity,
+          fundraiser_goal: eventData.goal,
+        })
+        navigate(`/events/${response.event.id}`)
+      } catch (requestError) {
+        setErrors({ form: requestError.message })
+      }
+      return
+    }
+    const saved = saveEvent({ ...eventData, id: existing.id })
     navigate(`/events/${saved.id}`)
   }
 
@@ -215,7 +231,7 @@ function EventForm({ existing }) {
           {existing ? 'Save changes' : 'Publish event'}
         </button>
         {Object.values(errors).some(Boolean) && (
-          <p className="text-center text-xs text-accent">Please fix the highlighted fields.</p>
+          <p className="text-center text-xs text-accent">{errors.form || 'Please fix the highlighted fields.'}</p>
         )}
       </aside>
     </form>
