@@ -1,24 +1,36 @@
-import jwt from 'jsonwebtoken'
-import 'dotenv/config'
+import { pool } from '../config/db.js'
+import { verifyToken } from '../config/jwt.js'
+import { USER_COLUMNS, serializeUser } from '../utils/users.js'
 
-const jwtSecret = process.env.JWT_SECRET
+// Resolves "Authorization: Bearer <token>" to { user } or { error }.
+// The user is re-read from the DB so a deleted account or a newly verified email takes effect immediately.
+async function authenticate(request) {
+  const [scheme, token] = (request.headers.authorization || '').split(' ')
+  if (scheme !== 'Bearer' || !token) return { error: 'Authentication required' }
 
-if (!jwtSecret) {
-  console.warn('JWT_SECRET is not configured; protected requests will be rejected.')
+  let payload
+  try {
+    payload = verifyToken(token)
+  } catch {
+    return { error: 'Invalid or expired token' }
+  }
+
+  const [[row]] = await pool.query(`SELECT ${USER_COLUMNS} FROM users WHERE id = ?`, [payload.sub])
+  if (!row) return { error: 'User no longer exists' }
+  return { user: serializeUser(row) }
 }
 
-export function requireAuth(request, response, next) {
-  const header = request.headers.authorization || ''
-  const [scheme, token] = header.split(' ')
+export async function requireAuth(request, response, next) {
+  const { user, error } = await authenticate(request)
+  if (error) return response.status(401).json({ error })
+  request.user = user
+  return next()
+}
 
-  if (scheme !== 'Bearer' || !token || !jwtSecret) {
-    return response.status(401).json({ error: 'Authentication required' })
-  }
-
-  try {
-    request.user = jwt.verify(token, jwtSecret)
-    return next()
-  } catch {
-    return response.status(401).json({ error: 'Invalid or expired token' })
-  }
+// For public routes that reveal more to signed-in users: sets req.user when a valid token
+// is sent, otherwise req.user = null. A stale token never blocks a public page.
+export async function optionalAuth(request, _response, next) {
+  const { user } = await authenticate(request)
+  request.user = user ?? null
+  return next()
 }

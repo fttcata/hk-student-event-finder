@@ -1,9 +1,15 @@
+// Must stay the first import: later modules read process.env while they load.
+import 'dotenv/config'
 import cors from 'cors'
 import express from 'express'
-import 'dotenv/config'
-import { pool } from '../config/db.js'
 import helmet from 'helmet'
+import { pool } from '../config/db.js'
+import { reportSmtpStatus } from '../config/email.js'
+import { errorHandler, notFound } from '../middleware/errors.js'
 import authRoutes from '../routes/auth.js'
+import categoryRoutes from '../routes/categories.js'
+import eventRoutes from '../routes/events.js'
+import userRoutes from '../routes/users.js'
 
 const app = express()
 const port = Number(process.env.PORT || 5000)
@@ -26,23 +32,14 @@ app.get('/api/health', async (_request, response) => {
 })
 
 app.use('/api/auth', authRoutes)
+app.use('/api/events', eventRoutes)
+app.use('/api/categories', categoryRoutes)
+app.use('/api/users', userRoutes)
 
-app.get('/api/events', async (_request, response) => {
-  try {
-    const [events] = await pool.query(
-      `SELECT e.id, e.title, c.name AS category, e.event_date AS date, e.location
-       FROM events e
-       JOIN categories c ON c.id = e.category_id
-       WHERE e.status = 'published'
-       ORDER BY e.event_date ASC`,
-    )
-    response.json({ events })
-  } catch (error) {
-    console.error(error)
-    response.status(500).json({ error: 'Unable to load events' })
-  }
-})
+app.use('/api', notFound)
+app.use(errorHandler)
 
 app.listen(port, () => {
   console.log(`API listening at http://localhost:${port}`)
+  reportSmtpStatus()
 })
