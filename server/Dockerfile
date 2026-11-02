@@ -8,6 +8,7 @@ RUN npm install --omit=dev
 COPY src ./src
 COPY config ./config
 COPY routes ./routes
+COPY queries ./queries
 COPY middleware ./middleware
 COPY utils ./utils
 

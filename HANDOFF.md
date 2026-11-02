@@ -14,6 +14,7 @@
 |---|---|---|
 | Seat ownership | A seat exists only while `tickets.status = 'confirmed'`. `cancelled` releases the seat but keeps the receipt row. | Proposal: capacity enforcement + receipt lookups after cancellation |
 | Ticket uniqueness | `UNIQUE(user_id, event_id)` — one ticket row per user per event. Rebooking = **UPDATE** the row (`cancelled → confirmed`), never a second INSERT. | Verified: round-trip update works; a second INSERT fails with 1062 |
+| Organizer tickets | Creating an event also issues its organizer a free confirmed ticket. It does not take a seat: seat counts exclude `tickets.user_id = events.organizer_id`. | Team decision: organizers join the event chat through a ticket |
 | Receipts | `reference_code` is UNIQUE in both `tickets` and `pledges`. Generate server-side (e.g. `TKT`/`PLG` + random), return in every booking/donation response. | Proposal: receipts with unique verification code |
 | Repeat donations | `pledges` has **no** unique on `(user_id, event_id)` — students may pledge many times. Don't add one. | Team decision (Option B): repeat giving is realistic for fundraisers |
 | Fundraiser progress | Always compute live: `SELECT COALESCE(SUM(amount),0) FROM pledges WHERE event_id = ?`. Never store a running total. | No stale counters; verified SUM = 350 on seed data |
@@ -96,7 +97,7 @@ async function chatOpen(req, res, next) {
 }
 ```
 
-Also require: authenticated user + `tickets.status = 'confirmed'` for that event (verified ticket holders only).
+Also require: authenticated, verified user + `tickets.status = 'confirmed'` or at least one pledge for that event (ticket holders and donors only).
 
 ---
 

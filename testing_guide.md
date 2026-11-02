@@ -203,7 +203,7 @@ curl.exe -s "$api/events?search=Robotics"          # 1 row
 curl.exe -s "$api/events?event_type=fundraiser"    # includes Winter Charity Drive
 
 # cleanup the test rows
-docker compose exec mysql mysql -uroot -proot_password student_events -e "DELETE FROM events WHERE organizer_id=(SELECT id FROM users WHERE email='eventtest@connect.hku.hk'); DELETE FROM users WHERE email='eventtest@connect.hku.hk';"
+docker compose exec mysql mysql -uroot -proot_password student_events -e "DELETE FROM tickets WHERE user_id=(SELECT id FROM users WHERE email='eventtest@connect.hku.hk'); DELETE FROM events WHERE organizer_id=(SELECT id FROM users WHERE email='eventtest@connect.hku.hk'); DELETE FROM users WHERE email='eventtest@connect.hku.hk';"
 ```
 
 Expected: `401`/`401`/`403`, three `201`s, two `400`s, and DB rows where
@@ -287,10 +287,10 @@ docker compose exec mysql mysql -uroot -proot_password student_events -e "UPDATE
 Book $free $book1.token 201 'rebook after cancel'
 
 # DB checks: one confirmed race row, ticket/code columns, email_log booking entries
-docker compose exec mysql mysql -uroot -proot_password student_events -e "SELECT id,user_id,event_id,type,status,reference_code,amount_paid FROM tickets WHERE event_id IN ($free,$race,$paid); SELECT COUNT(*) AS confirmed_race_seats FROM tickets WHERE event_id=$race AND status='confirmed'; SELECT type,status,reference_code FROM email_log WHERE reference_code LIKE 'TKT%' ORDER BY id DESC LIMIT 5;"
+docker compose exec mysql mysql -uroot -proot_password student_events -e "SELECT id,user_id,event_id,type,status,reference_code,amount_paid FROM tickets WHERE event_id IN ($free,$race,$paid); SELECT COUNT(*) AS confirmed_race_seats FROM tickets WHERE event_id=$race AND status='confirmed' AND user_id<>$($org.user.id); SELECT type,status,reference_code FROM email_log WHERE reference_code LIKE 'TKT%' ORDER BY id DESC LIMIT 5;"
 
 # cleanup: tickets first (FK RESTRICT), then events, then users
-docker compose exec mysql mysql -uroot -proot_password student_events -e "DELETE FROM tickets WHERE event_id IN ($free,$race,$paid); DELETE FROM events WHERE organizer_id=$($org.user.id); DELETE FROM users WHERE email IN ('org.tickets@connect.hku.hk','ticket1@connect.hku.hk','ticket2@connect.hku.hk','unverified.tickets@connect.hku.hk');"
+docker compose exec mysql mysql -uroot -proot_password student_events -e "DELETE FROM tickets WHERE event_id IN (SELECT id FROM events WHERE organizer_id=$($org.user.id)); DELETE FROM events WHERE organizer_id=$($org.user.id); DELETE FROM users WHERE email IN ('org.tickets@connect.hku.hk','ticket1@connect.hku.hk','ticket2@connect.hku.hk','unverified.tickets@connect.hku.hk');"
 ```
 
 Expected: `401`/`403`, `201` for free/paid/rebook, `400` for the fundraiser, `409` for
@@ -299,7 +299,74 @@ and `ticket_code` matching `TKT` + 9 uppercase alphanumerics. Receipt emails dep
 without `server/.env` credentials `receipt_email_sent` is `false` and `email_log` records
 `failed`; with Mailtrap credentials it is `true`/`sent`.
 
-## 11. Teardown
+## 11. Event chat tests (`GET /api/events/:id/messages`, protected)
+
+> Chat is open from 6 hours before the event until 7 days after it, for verified holders of a
+> confirmed ticket and for donors. Creating an event issues its organizer a free ticket that does
+> not take a seat. Event dates are moved with SQL because the API only accepts future dates.
+
+```powershell
+$dir = "$env:TEMP\chattests"; New-Item -ItemType Directory -Force -Path $dir | Out-Null
+$api = 'http://localhost:5000/api'
+function Sql($query) { docker compose exec mysql mysql -uroot -proot_password student_events -N -e $query }
+function Body($file, $json) { Set-Content -LiteralPath "$dir\$file" -Value $json -Encoding ASCII -NoNewline }
+function Call($method, $path, $file, $auth) {
+  $headers = @()
+  if ($file) { $headers += @('-H', 'Content-Type: application/json', '--data-binary', "@$dir\$file") }
+  if ($auth) { $headers += @('-H', "Authorization: Bearer $auth") }
+  $code = curl.exe -s -o "$dir\out.json" -w "%{http_code}" -X $method "$api$path" @headers
+  @{ code = $code; body = Get-Content "$dir\out.json" -Raw }
+}
+function Register($name, $email) {
+  Body reg.json "{`"name`":`"$name`",`"email`":`"$email`",`"password`":`"password123`"}"
+  (Call 'POST' '/auth/register' 'reg.json' $null).body | ConvertFrom-Json
+}
+function Chat($eventId, $auth, $expect, $label) {
+  $result = Call 'GET' "/events/$eventId/messages" $null $auth
+  $mark = if ($result.code -eq $expect) { 'PASS' } else { "FAIL (expected $expect)" }
+  "[$mark] $label -> $($result.code)  $($result.body)"
+}
+
+$org = Register 'Chat Organizer' 'org.chat@connect.hku.hk'
+$holder = Register 'Chat Holder' 'holder.chat@connect.hku.hk'
+$donor = Register 'Chat Donor' 'donor.chat@connect.hku.hk'
+$outsider = Register 'Chat Outsider' 'outsider.chat@connect.hku.hk'
+Sql "UPDATE users SET is_verified=1 WHERE email LIKE '%.chat@connect.hku.hk';"
+
+Body std.json '{"event_type":"standard","title":"Chat Test Event","description":"Event used for the chat access tests in the guide.","category":"Social","date":"2026-12-20T18:00:00Z","location":"Test Hall","capacity":1,"price":0}'
+Body fund.json '{"event_type":"fundraiser","title":"Chat Test Fundraiser","description":"Fundraiser used for the chat access tests in the guide.","category":"Charity","date":"2026-12-21T18:00:00Z","location":"Test Hall","fundraiser_goal":500}'
+Body pledge.json '{"amount":25}'
+$std = ((Call 'POST' '/events' 'std.json' $org.token).body | ConvertFrom-Json).event.id
+$fund = ((Call 'POST' '/events' 'fund.json' $org.token).body | ConvertFrom-Json).event.id
+
+# the organizer's ticket leaves the single seat free for the holder
+(Call 'POST' "/events/$std/tickets" $null $holder.token).code      # 201
+Call 'POST' "/events/$fund/donate" 'pledge.json' $donor.token | Out-Null
+
+Chat $std $null 401 'no token'
+Chat 'abc' $holder.token 404 'non-numeric id'
+Chat $std $holder.token 403 'before the window opens'
+
+# inside the window: T+1h
+Sql "UPDATE events SET event_date=UTC_TIMESTAMP() - INTERVAL 1 HOUR WHERE id IN ($std,$fund); INSERT INTO chat_messages (event_id,user_id,content,created_at) VALUES ($std,$($org.user.id),'second',UTC_TIMESTAMP()),($std,$($holder.user.id),'first',UTC_TIMESTAMP() - INTERVAL 1 MINUTE);"
+Chat $std $holder.token 200 'ticket holder'              # first, then second
+Chat $std $org.token 200 'organizer ticket'
+Chat $fund $org.token 200 'fundraiser organizer'
+Chat $fund $donor.token 200 'donor'
+Chat $std $outsider.token 403 'no ticket or pledge'
+Chat $fund $outsider.token 403 'no pledge'
+
+# after the window: T+8d
+Sql "UPDATE events SET event_date=UTC_TIMESTAMP() - INTERVAL 8 DAY WHERE id=$std;"
+Chat $std $holder.token 403 'after the window closes'
+
+# cleanup: tickets and pledges first (FK RESTRICT), then events, then users
+Sql "DELETE FROM tickets WHERE event_id IN ($std,$fund); DELETE FROM pledges WHERE event_id IN ($std,$fund); DELETE FROM events WHERE id IN ($std,$fund); DELETE FROM users WHERE email LIKE '%.chat@connect.hku.hk';"
+```
+
+Expected: every line prints `PASS`, and the ticket booking prints `201`.
+
+## 12. Teardown
 
 ```powershell
 docker compose down        # keep data

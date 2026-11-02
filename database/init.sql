@@ -227,6 +227,13 @@ FROM users u, events e
 WHERE u.email = 'student@hkstu.edu' AND e.title = 'Design Portfolio Workshop'
 AND NOT EXISTS (SELECT 1 FROM tickets t WHERE t.user_id = u.id AND t.event_id = e.id);
 
+-- Every organizer holds a free ticket to their own event (it does not take a seat).
+-- Also works as a backfill: run it once against a database created before this rule.
+INSERT INTO tickets (user_id, event_id, type, status, reference_code, amount_paid)
+SELECT e.organizer_id, e.id, 'free', 'confirmed', CONCAT('TKTORG', LPAD(e.id, 6, '0')), 0.00
+FROM events e
+WHERE NOT EXISTS (SELECT 1 FROM tickets t WHERE t.user_id = e.organizer_id AND t.event_id = e.id);
+
 INSERT INTO pledges (event_id, user_id, amount, reference_code)
 SELECT e.id, u.id, 100.00, 'PLG5T3Y8U2I6'
 FROM users u, events e

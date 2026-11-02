@@ -1,8 +1,29 @@
 import crypto from 'node:crypto'
 import { Router } from 'express'
-import { pool } from '../config/db.js'
 import { sendDonationReceipt, sendTicketReceipt } from '../config/email.js'
 import { optionalAuth, requireAuth } from '../middleware/auth.js'
+import { findCategoryById, findCategoryByName } from '../queries/categories.js'
+import { isChatMember, listEventMessages } from '../queries/chat.js'
+import { logEmail } from '../queries/emailLog.js'
+import {
+  cancelEvent,
+  findEventRow,
+  findEventStatus,
+  insertEvent,
+  listEventRows,
+  lockEventForBooking,
+  lockEventRow,
+  updateEvent,
+} from '../queries/events.js'
+import { insertPledge } from '../queries/pledges.js'
+import {
+  countBookedSeats,
+  findTicketById,
+  insertTicket,
+  lockUserTicket,
+  reconfirmTicket,
+} from '../queries/tickets.js'
+import { withTransaction } from '../queries/transaction.js'
 
 const router = Router()
 
@@ -12,26 +33,6 @@ const PRICE_FILTERS = ['free', 'paid']
 const DEFAULT_PAGE = 1
 const DEFAULT_LIMIT = 12
 const MAX_LIMIT = 50
-
-// Ticket counts and fundraiser totals are computed live (see HANDOFF.md §1) — never stored.
-const BOOKED_TICKETS_SQL = `(SELECT COUNT(*) FROM tickets t WHERE t.event_id = e.id AND t.status = 'confirmed')`
-
-// One SELECT for every endpoint that returns events, so list, detail and create share a shape.
-const EVENT_SELECT = `
-  SELECT e.id, e.title, e.description, e.category_id, c.name AS category,
-         e.event_type, e.status, e.image_url, e.event_date, e.registration_deadline,
-         e.location, e.address, e.latitude, e.longitude,
-         e.capacity, e.price, e.goal_amount, e.created_at,
-         u.id AS organizer_id, u.name AS organizer_name, u.email AS organizer_email,
-         u.role AS organizer_role, u.student_id AS organizer_student_id,
-         u.university AS organizer_university, u.is_verified AS organizer_is_verified,
-         ${BOOKED_TICKETS_SQL} AS booked,
-         (SELECT COALESCE(SUM(p.amount), 0) FROM pledges p WHERE p.event_id = e.id) AS raised,
-         (SELECT COUNT(*) FROM pledges p WHERE p.event_id = e.id) AS pledge_count,
-         (SELECT COUNT(DISTINCT p.user_id) FROM pledges p WHERE p.event_id = e.id) AS donor_count
-  FROM events e
-  JOIN categories c ON c.id = e.category_id
-  JOIN users u ON u.id = e.organizer_id`
 
 // Organizer contact details (email, student ID) are only shown to signed-in viewers.
 function serializeOrganizer(row, viewer) {
@@ -99,7 +100,7 @@ function serializeEvent(row, viewer) {
 }
 
 async function selectEventById(eventId, viewer) {
-  const [[row]] = await pool.query(`${EVENT_SELECT} WHERE e.id = ? AND e.status <> 'draft' LIMIT 1`, [eventId])
+  const row = await findEventRow(eventId)
   return row ? serializeEvent(row, viewer) : null
 }
 
@@ -110,40 +111,24 @@ function parsePositiveInt(value, fallback) {
   return Number.isSafeInteger(parsed) ? parsed : null
 }
 
-// Escape LIKE wildcards so a search for "100%" only matches a literal percent sign.
-function escapeLike(value) {
-  return value.replace(/[\\%_]/g, (character) => `\\${character}`)
-}
+// Validates the list query string into filters for listEventRows, or returns { error }.
+function parseEventFilters(query) {
+  const filters = {}
 
-// Shared WHERE builder for the list query and the total-count query.
-function buildEventFilters(query) {
-  const conditions = [`e.status = 'published'`]
-  const params = []
-
-  const search = typeof query.search === 'string' ? query.search.trim() : ''
-  if (search) {
-    const pattern = `%${escapeLike(search)}%`
-    conditions.push(`(e.title LIKE ? ESCAPE '\\\\'
-      OR e.description LIKE ? ESCAPE '\\\\'
-      OR e.location LIKE ? ESCAPE '\\\\')`)
-    params.push(pattern, pattern, pattern)
-  }
+  filters.search = typeof query.search === 'string' ? query.search.trim() : ''
 
   if (query.category_id !== undefined) {
-    const categoryId = parsePositiveInt(query.category_id, null)
-    if (categoryId === null || categoryId < 1) {
+    filters.categoryId = parsePositiveInt(query.category_id, null)
+    if (filters.categoryId === null || filters.categoryId < 1) {
       return { error: 'category_id must be a positive integer' }
     }
-    conditions.push('e.category_id = ?')
-    params.push(categoryId)
   }
 
   if (query.event_type !== undefined) {
     if (!EVENT_TYPES.includes(query.event_type)) {
       return { error: "event_type must be 'standard' or 'fundraiser'" }
     }
-    conditions.push('e.event_type = ?')
-    params.push(query.event_type)
+    filters.eventType = query.event_type
   }
 
   // Anson's catalog tabs need free/paid filtering on top of event_type.
@@ -151,21 +136,15 @@ function buildEventFilters(query) {
     if (!PRICE_FILTERS.includes(query.price)) {
       return { error: "price must be 'free' or 'paid'" }
     }
-    conditions.push(query.price === 'free' ? 'e.price = 0' : 'e.price > 0')
+    filters.price = query.price
   }
 
-  const availability = query.availability ?? 'all'
-  if (!AVAILABILITY_FILTERS.includes(availability)) {
+  filters.availability = query.availability ?? 'all'
+  if (!AVAILABILITY_FILTERS.includes(filters.availability)) {
     return { error: "availability must be 'available', 'sold_out' or 'all'" }
   }
-  // capacity = 0 means unlimited seats, so those events are never sold out.
-  if (availability === 'available') {
-    conditions.push(`(e.capacity = 0 OR ${BOOKED_TICKETS_SQL} < e.capacity)`)
-  } else if (availability === 'sold_out') {
-    conditions.push(`(e.capacity > 0 AND ${BOOKED_TICKETS_SQL} >= e.capacity)`)
-  }
 
-  return { where: conditions.join(' AND '), params }
+  return { filters }
 }
 
 router.get('/', optionalAuth, async (request, response) => {
@@ -178,22 +157,12 @@ router.get('/', optionalAuth, async (request, response) => {
     return response.status(400).json({ error: `limit must be an integer between 1 and ${MAX_LIMIT}` })
   }
 
-  const filters = buildEventFilters(request.query)
-  if (filters.error) {
-    return response.status(400).json({ error: filters.error })
+  const { error, filters } = parseEventFilters(request.query)
+  if (error) {
+    return response.status(400).json({ error })
   }
 
-  const [[{ total }]] = await pool.query(
-    `SELECT COUNT(*) AS total FROM events e WHERE ${filters.where}`,
-    filters.params,
-  )
-  const [rows] = await pool.query(
-    `${EVENT_SELECT}
-     WHERE ${filters.where}
-     ORDER BY e.event_date ASC, e.id ASC
-     LIMIT ? OFFSET ?`,
-    [...filters.params, limit, (page - 1) * limit],
-  )
+  const { rows, total } = await listEventRows(filters, limit, (page - 1) * limit)
 
   const events = rows.map((row) => serializeEvent(row, request.user))
   return response.json({ events, page, limit, total })
@@ -217,22 +186,45 @@ router.get('/:id', optionalAuth, async (request, response) => {
   return response.status(200).json({ event })
 })
 
-router.get('/:id/messages', optionalAuth, async (request, response) => {
+const CHAT_OPENS_BEFORE_MS = 6 * 60 * 60 * 1000
+const CHAT_CLOSES_AFTER_MS = 7 * 24 * 60 * 60 * 1000
+
+// HANDOFF.md §1 and §3: chat is for verified ticket holders and donors, from 6 hours before the
+// event until 7 days after it. Runs after requireAuth and sets request.eventId.
+async function requireChatAccess(request, response, next) {
+  if (!request.user.is_verified) {
+    return response.status(403).json({ error: 'Verify your student email before using the event chat' })
+  }
+
   const eventId = parseEventId(request.params.id)
   if (eventId === null) return response.status(404).json(EVENT_NOT_FOUND)
-  const [[event]] = await pool.query('SELECT event_date FROM events WHERE id = ? AND status = \'published\'', [eventId])
+
+  const event = await findEventStatus(eventId)
   if (!event) return response.status(404).json(EVENT_NOT_FOUND)
-  const now = new Date()
-  const eventDate = new Date(event.event_date)
-  const opensAt = new Date(eventDate.getTime() - 6 * 60 * 60 * 1000)
-  if (now < opensAt || now >= eventDate) return response.json({ messages: [] })
-  const [messages] = await pool.query(
-    `SELECT m.id, m.content, m.created_at, u.name AS user_name
-     FROM chat_messages m JOIN users u ON u.id = m.user_id
-     WHERE m.event_id = ? ORDER BY m.created_at ASC LIMIT 100`,
-    [eventId],
-  )
-  return response.json({ messages })
+
+  if (!(await isChatMember(request.user.id, eventId))) {
+    return response.status(403).json({ error: 'Only ticket holders and donors can access the event chat' })
+  }
+
+  if (event.status === 'cancelled') {
+    return response.status(403).json({ error: 'This event has been cancelled' })
+  }
+  const now = Date.now()
+  const startsAt = event.event_date.getTime()
+  if (now < startsAt - CHAT_OPENS_BEFORE_MS) {
+    return response.status(403).json({ error: 'Chat opens 6 hours before the event' })
+  }
+  if (now > startsAt + CHAT_CLOSES_AFTER_MS) {
+    return response.status(403).json({ error: 'Chat has closed' })
+  }
+
+  request.eventId = eventId
+  return next()
+}
+
+router.get('/:id/messages', requireAuth, requireChatAccess, async (request, response) => {
+  const messages = await listEventMessages(request.eventId)
+  return response.status(200).json({ messages })
 })
 
 // Upper bounds keep values inside their columns (DECIMAL(8,2), DECIMAL(10,2), INT UNSIGNED, TEXT),
@@ -359,14 +351,14 @@ async function parseEventInput(body) {
     if (!Number.isInteger(categoryId) || categoryId < 1) {
       return { error: 'Unknown category' }
     }
-    const [[category]] = await pool.query('SELECT id FROM categories WHERE id = ?', [categoryId])
+    const category = await findCategoryById(categoryId)
     if (!category) return { error: 'Unknown category' }
   } else {
     const categoryName = typeof body.category === 'string' ? body.category.trim() : ''
     if (!categoryName) {
       return { error: 'Category is required' }
     }
-    const [[category]] = await pool.query('SELECT id FROM categories WHERE name = ?', [categoryName])
+    const category = await findCategoryByName(categoryName)
     // Note: the client form offers 'Arts', which is not seeded — 400 for now,
     // pending the team's decision to seed it or auto-create categories.
     if (!category) return { error: 'Unknown category' }
@@ -393,6 +385,25 @@ async function parseEventInput(body) {
   }
 }
 
+const REFERENCE_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+
+// Receipt codes follow the seed format: <prefix> + 9 uppercase alphanumerics (UNIQUE in both tables).
+function generateReference(prefix) {
+  const bytes = crypto.randomBytes(9)
+  return prefix + Array.from(bytes, (byte) => REFERENCE_ALPHABET[byte % REFERENCE_ALPHABET.length]).join('')
+}
+
+// Calls write(referenceCode), retrying with a fresh code on a uq_tickets_reference collision.
+async function withFreshReference(prefix, write) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return await write(generateReference(prefix))
+    } catch (error) {
+      if (error.code !== 'ER_DUP_ENTRY' || attempt === 2) throw error
+    }
+  }
+}
+
 // Protected: creating an event requires a valid Bearer token (see middleware/auth.js).
 // 403 gate per HANDOFF.md §1: only verified students may create events.
 // Note: POST /api/auth/verify is not implemented yet, so freshly registered users
@@ -405,14 +416,18 @@ router.post('/', requireAuth, async (request, response) => {
   const { error, values } = await parseEventInput(request.body ?? {})
   if (error) return response.status(400).json({ error })
 
-  // SET ? expands the column-keyed object (mysql2 escapes every value).
-  const [result] = await pool.query('INSERT INTO events SET ?', [
-    { ...values, organizer_id: request.user.id, status: 'published' },
-  ])
+  // The organizer gets a free ticket with the event (it does not take a seat), which also lets them into the chat.
+  let eventId
+  await withTransaction(async (connection) => {
+    eventId = await insertEvent(connection, { ...values, organizer_id: request.user.id, status: 'published' })
+    await withFreshReference('TKT', (referenceCode) =>
+      insertTicket(connection, { userId: request.user.id, eventId, type: 'free', referenceCode, amountPaid: 0 }),
+    )
+  })
 
-  const event = await selectEventById(result.insertId, request.user)
+  const event = await selectEventById(eventId, request.user)
   if (!event) {
-    throw new Error(`Event ${result.insertId} was inserted but could not be read back`)
+    throw new Error(`Event ${eventId} was inserted but could not be read back`)
   }
 
   return response.status(201).json({ event })
@@ -424,38 +439,12 @@ async function findOwnedEvent(connection, rawId, user) {
   const eventId = parseEventId(rawId)
   if (eventId === null) return { status: 404, ...EVENT_NOT_FOUND }
 
-  // FOR UPDATE OF e locks only the event row, so a concurrent booking cannot slip past a
-  // capacity or status change (the joined user and category rows stay unlocked).
-  const [[row]] = await connection.query(
-    `${EVENT_SELECT} WHERE e.id = ? AND e.status <> 'draft' LIMIT 1 FOR UPDATE OF e`,
-    [eventId],
-  )
+  const row = await lockEventRow(connection, eventId)
   if (!row) return { status: 404, ...EVENT_NOT_FOUND }
   if (row.organizer_id !== user.id) {
     return { status: 403, error: 'Only the event organizer can change this event' }
   }
   return { row }
-}
-
-// Runs handler(connection) in a transaction; it returns { status, body } for an early
-// (rolled-back) response, or nothing to commit.
-async function withTransaction(handler) {
-  const connection = await pool.getConnection()
-  try {
-    await connection.beginTransaction()
-    const earlyResponse = await handler(connection)
-    if (earlyResponse) {
-      await connection.rollback()
-      return earlyResponse
-    }
-    await connection.commit()
-    return null
-  } catch (error) {
-    await connection.rollback()
-    throw error
-  } finally {
-    connection.release()
-  }
 }
 
 // Protected, organizer only. Fields left out keep their current value, so the client can send
@@ -502,7 +491,7 @@ router.put('/:id', requireAuth, async (request, response) => {
       }
     }
 
-    await connection.query('UPDATE events SET ? WHERE id = ?', [values, row.id])
+    await updateEvent(connection, row.id, values)
     eventId = row.id
   })
   if (earlyResponse) return response.status(earlyResponse.status).json(earlyResponse.body)
@@ -519,7 +508,7 @@ router.delete('/:id', requireAuth, async (request, response) => {
     const { row, status, error } = await findOwnedEvent(connection, request.params.id, request.user)
     if (error) return { status, body: { error } }
 
-    await connection.query(`UPDATE events SET status = 'cancelled' WHERE id = ?`, [row.id])
+    await cancelEvent(connection, row.id)
     eventId = row.id
   })
   if (earlyResponse) return response.status(earlyResponse.status).json(earlyResponse.body)
@@ -529,14 +518,6 @@ router.delete('/:id', requireAuth, async (request, response) => {
 })
 
 const MAX_DONATION = 100000
-
-const REFERENCE_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
-
-// Receipt codes follow the seed format: <prefix> + 9 uppercase alphanumerics (UNIQUE in both tables).
-function generateReference(prefix) {
-  const bytes = crypto.randomBytes(9)
-  return prefix + Array.from(bytes, (byte) => REFERENCE_ALPHABET[byte % REFERENCE_ALPHABET.length]).join('')
-}
 
 // Protected, verified students only (HANDOFF.md §1). raised_amount is never stored: inserting
 // the pledge row is what raises it, since it is SUM(pledges.amount). Repeat donations are allowed.
@@ -548,10 +529,7 @@ router.post('/:id/donate', requireAuth, async (request, response) => {
   const eventId = parseEventId(request.params.id)
   if (eventId === null) return response.status(404).json(EVENT_NOT_FOUND)
 
-  const [[target]] = await pool.query(
-    `SELECT event_type, status, event_date FROM events WHERE id = ? AND status <> 'draft'`,
-    [eventId],
-  )
+  const target = await findEventStatus(eventId)
   if (!target) return response.status(404).json(EVENT_NOT_FOUND)
   if (target.event_type !== 'fundraiser') {
     return response.status(400).json({ error: 'Donations are only accepted for fundraiser events' })
@@ -572,17 +550,13 @@ router.post('/:id/donate', requireAuth, async (request, response) => {
   }
 
   const referenceCode = generateReference('PLG')
-  const [result] = await pool.query(
-    'INSERT INTO pledges (event_id, user_id, amount, reference_code) VALUES (?, ?, ?, ?)',
-    [eventId, request.user.id, amount, referenceCode],
-  )
-  const [[pledgeRow]] = await pool.query('SELECT created_at FROM pledges WHERE id = ?', [result.insertId])
+  const stored = await insertPledge({ eventId, userId: request.user.id, amount, referenceCode })
   const pledge = {
-    id: result.insertId,
+    id: stored.id,
     event_id: eventId,
     amount,
     reference_code: referenceCode,
-    created_at: pledgeRow.created_at,
+    created_at: stored.created_at,
   }
 
   const event = await selectEventById(eventId, request.user)
@@ -595,10 +569,7 @@ router.post('/:id/donate', requireAuth, async (request, response) => {
   } catch (error) {
     console.error(`Donation receipt ${referenceCode} was not emailed: ${error.message}`)
   }
-  await pool.query(
-    `INSERT INTO email_log (user_id, type, reference_code, status) VALUES (?, 'donation', ?, ?)`,
-    [request.user.id, referenceCode, emailSent ? 'sent' : 'failed'],
-  )
+  await logEmail(request.user.id, 'donation', referenceCode, emailSent)
 
   return response.status(200).json({ pledge, event, receipt_email_sent: emailSent })
 })
@@ -615,12 +586,7 @@ router.post('/:id/tickets', requireAuth, async (request, response) => {
 
   let ticketId
   const earlyResponse = await withTransaction(async (connection) => {
-    // FOR UPDATE serializes concurrent bookings for this event until this transaction commits.
-    const [[event]] = await connection.query(
-      `SELECT id, event_type, status, capacity, price, event_date, registration_deadline
-       FROM events WHERE id = ? AND status <> 'draft' LIMIT 1 FOR UPDATE`,
-      [eventId],
-    )
+    const event = await lockEventForBooking(connection, eventId)
     if (!event) return { status: 404, body: EVENT_NOT_FOUND }
     if (event.status === 'cancelled') {
       return { status: 409, body: { error: 'This event has been cancelled' } }
@@ -637,55 +603,30 @@ router.post('/:id/tickets', requireAuth, async (request, response) => {
       return { status: 409, body: { error: 'This event has already started' } }
     }
 
-    const [[existing]] = await connection.query(
-      `SELECT id, status FROM tickets WHERE user_id = ? AND event_id = ? FOR UPDATE`,
-      [request.user.id, eventId],
-    )
+    const existing = await lockUserTicket(connection, request.user.id, eventId)
     if (existing?.status === 'confirmed') {
       return { status: 409, body: { error: 'You already have a ticket for this event' } }
     }
 
-    const [[{ booked }]] = await connection.query(
-      `SELECT COUNT(*) AS booked FROM tickets WHERE event_id = ? AND status = 'confirmed'`,
-      [eventId],
-    )
+    const booked = await countBookedSeats(connection, eventId, event.organizer_id)
     if (event.capacity > 0 && booked >= event.capacity) {
       return { status: 409, body: { error: 'Event is full' } }
     }
 
     const type = event.price > 0 ? 'paid' : 'free'
-    // A cancelled ticket keeps its row (UNIQUE user+event), so rebooking confirms it again.
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      const referenceCode = generateReference('TKT')
-      try {
-        if (existing) {
-          await connection.query(
-            `UPDATE tickets SET type = ?, status = 'confirmed', reference_code = ?, amount_paid = ? WHERE id = ?`,
-            [type, referenceCode, event.price, existing.id],
-          )
-          ticketId = existing.id
-        } else {
-          const [result] = await connection.query(
-            `INSERT INTO tickets (user_id, event_id, type, status, reference_code, amount_paid)
-             VALUES (?, ?, ?, 'confirmed', ?, ?)`,
-            [request.user.id, eventId, type, referenceCode, event.price],
-          )
-          ticketId = result.insertId
-        }
-        break
-      } catch (error) {
-        // uq_tickets_reference collision: generate a fresh code. Anything else is a real failure.
-        if (error.code !== 'ER_DUP_ENTRY' || attempt === 2) throw error
+    await withFreshReference('TKT', async (referenceCode) => {
+      const fields = { type, referenceCode, amountPaid: event.price }
+      if (existing) {
+        await reconfirmTicket(connection, existing.id, fields)
+        ticketId = existing.id
+      } else {
+        ticketId = await insertTicket(connection, { ...fields, userId: request.user.id, eventId })
       }
-    }
+    })
   })
   if (earlyResponse) return response.status(earlyResponse.status).json(earlyResponse.body)
 
-  const [[ticketRow]] = await pool.query(
-    `SELECT id, event_id, type, status, reference_code, amount_paid, created_at
-     FROM tickets WHERE id = ?`,
-    [ticketId],
-  )
+  const ticketRow = await findTicketById(ticketId)
   const ticket = {
     id: ticketRow.id,
     ticket_code: ticketRow.reference_code,
@@ -707,10 +648,7 @@ router.post('/:id/tickets', requireAuth, async (request, response) => {
   } catch (error) {
     console.error(`Ticket receipt ${ticket.reference_code} was not emailed: ${error.message}`)
   }
-  await pool.query(
-    `INSERT INTO email_log (user_id, type, reference_code, status) VALUES (?, 'booking', ?, ?)`,
-    [request.user.id, ticket.reference_code, emailSent ? 'sent' : 'failed'],
-  )
+  await logEmail(request.user.id, 'booking', ticket.reference_code, emailSent)
 
   return response.status(201).json({ ticket, event, receipt_email_sent: emailSent })
 })

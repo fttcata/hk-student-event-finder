@@ -21,7 +21,9 @@ export async function apiPost(path, body) {
 
 async function requestError(response) {
   const data = await response.json().catch(() => ({}))
-  return new Error(data.error || `Request failed with status ${response.status}`)
+  const error = new Error(data.error || `Request failed with status ${response.status}`)
+  error.status = response.status
+  return error
 }
 
 function authHeaders() {
