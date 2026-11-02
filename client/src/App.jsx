@@ -1,5 +1,6 @@
 import { Route, Routes } from 'react-router-dom'
 import Navbar from './components/Navbar.jsx'
+import FloatingEventChat from './components/FloatingEventChat.jsx'
 import ProtectedRoute from './components/ProtectedRoute.jsx'
 import CreateEventPage from './pages/CreateEventPage.jsx'
 import AdminEventsPage from './pages/AdminEventsPage.jsx'
@@ -80,6 +81,7 @@ export default function App() {
             <Route path="*" element={<NotFoundPage />} />
           </Routes>
         </div>
+        <FloatingEventChat />
         <footer className="border-t border-line">
           <div className="mx-auto flex max-w-6xl flex-col justify-between gap-2 px-4 py-6 font-mono text-xs text-muted sm:flex-row sm:px-6">
             <span>◒ Campus Hub · COMP3322 group project</span>
