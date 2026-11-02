@@ -1,7 +1,8 @@
 import { pool } from '../config/db.js'
 
-// Ticket counts and fundraiser totals are computed live (see HANDOFF.md §1) — never stored.
-// The organizer's own ticket does not take a seat.
+// Booked counts and fundraiser totals are computed live; available_tickets is the stored booking
+// counter that the booking/cancellation transactions maintain under the event row lock.
+// The organizer's own ticket does not take a seat, so it is left out of both.
 const BOOKED_TICKETS_SQL = `(SELECT COUNT(*) FROM tickets t
   WHERE t.event_id = e.id AND t.status = 'confirmed' AND t.user_id <> e.organizer_id)`
 
@@ -10,7 +11,7 @@ const EVENT_SELECT = `
   SELECT e.id, e.title, e.description, e.category_id, c.name AS category,
          e.event_type, e.status, e.image_url, e.event_date, e.registration_deadline,
          e.location, e.address, e.latitude, e.longitude,
-         e.capacity, e.price, e.goal_amount, e.created_at,
+         e.capacity, e.available_tickets, e.price, e.goal_amount, e.created_at,
          u.id AS organizer_id, u.name AS organizer_name, u.email AS organizer_email,
          u.role AS organizer_role, u.student_id AS organizer_student_id,
          u.university AS organizer_university, u.is_verified AS organizer_is_verified,
@@ -52,9 +53,9 @@ function buildEventFilters({ search, categoryId, eventType, price, availability 
   }
   // capacity = 0 means unlimited seats, so those events are never sold out.
   if (availability === 'available') {
-    conditions.push(`(e.capacity = 0 OR ${BOOKED_TICKETS_SQL} < e.capacity)`)
+    conditions.push('(e.capacity = 0 OR e.available_tickets > 0)')
   } else if (availability === 'sold_out') {
-    conditions.push(`(e.capacity > 0 AND ${BOOKED_TICKETS_SQL} >= e.capacity)`)
+    conditions.push('(e.capacity > 0 AND e.available_tickets = 0)')
   }
 
   return { where: conditions.join(' AND '), params }
@@ -100,11 +101,29 @@ export async function findEventStatus(eventId) {
 // FOR UPDATE serializes concurrent bookings for this event until the transaction commits.
 export async function lockEventForBooking(connection, eventId) {
   const [[event]] = await connection.query(
-    `SELECT id, organizer_id, event_type, status, capacity, price, event_date, registration_deadline
+    `SELECT id, organizer_id, event_type, status, capacity, available_tickets, price, event_date, registration_deadline
      FROM events WHERE id = ? AND status <> 'draft' LIMIT 1 FOR UPDATE`,
     [eventId],
   )
   return event ?? null
+}
+
+// Same lock order as booking: event first, then the ticket row.
+export async function lockEventForCancellation(connection, eventId) {
+  const [[event]] = await connection.query('SELECT id, organizer_id FROM events WHERE id = ? LIMIT 1 FOR UPDATE', [
+    eventId,
+  ])
+  return event ?? null
+}
+
+export async function reserveSeats(connection, eventId, seats) {
+  await connection.query('UPDATE events SET available_tickets = available_tickets - ? WHERE id = ?', [seats, eventId])
+}
+
+export async function releaseSeat(connection, eventId) {
+  await connection.query(`UPDATE events SET available_tickets = LEAST(available_tickets + 1, capacity) WHERE id = ?`, [
+    eventId,
+  ])
 }
 
 // `values` is keyed by column name; SET ? expands it (mysql2 escapes every value).

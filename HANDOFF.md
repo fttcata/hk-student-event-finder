@@ -12,10 +12,10 @@
 
 | Decision | Rule | Why |
 |---|---|---|
-| Seat ownership | A seat exists only while `tickets.status = 'confirmed'`. `cancelled` releases the seat but keeps the receipt row. | Proposal: capacity enforcement + receipt lookups after cancellation |
-| Ticket uniqueness | `UNIQUE(user_id, event_id)` — one ticket row per user per event. Rebooking = **UPDATE** the row (`cancelled → confirmed`), never a second INSERT. | Verified: round-trip update works; a second INSERT fails with 1062 |
-| Organizer tickets | Creating an event also issues its organizer a free confirmed ticket. It does not take a seat: seat counts exclude `tickets.user_id = events.organizer_id`. | Team decision: organizers join the event chat through a ticket |
-| Receipts | `reference_code` is UNIQUE in both `tickets` and `pledges`. Generate server-side (e.g. `TKT`/`PLG` + random), return in every booking/donation response. | Proposal: receipts with unique verification code |
+| Seat ownership | A seat exists only while `tickets.status = 'confirmed'`. `cancelled` releases the seat but keeps the receipt row. Standard events keep a stored `events.available_tickets` counter, decremented on booking and restored on cancellation inside the event-row lock. | Proposal: capacity enforcement + receipt lookups after cancellation |
+| Ticket uniqueness | `UNIQUE(user_id, event_id)` — one ticket row per holder per event. A buyer may book seats for several registered, verified students; each row keeps the holder's `user_id` and records the buyer in `purchased_by`. Rebooking = **UPDATE** the row (`cancelled → confirmed`), never a second INSERT. | Verified: round-trip update works; a second INSERT fails with 1062 |
+| Organizer tickets | Creating an event also issues its organizer a free confirmed ticket. It does not take a seat: `available_tickets` and booked counts ignore `tickets.user_id = events.organizer_id`. | Team decision: organizers join the event chat through a ticket |
+| Receipts | `tickets.ticket_code` is a server-generated UUID and is UNIQUE; `pledges.reference_code` remains UNIQUE with a `PLG` prefix. Return the code in every booking/donation response. `email_log.reference_code` is wide enough for the UUID. | Proposal: receipts with unique verification code |
 | Repeat donations | `pledges` has **no** unique on `(user_id, event_id)` — students may pledge many times. Don't add one. | Team decision (Option B): repeat giving is realistic for fundraisers |
 | Fundraiser progress | Always compute live: `SELECT COALESCE(SUM(amount),0) FROM pledges WHERE event_id = ?`. Never store a running total. | No stale counters; verified SUM = 350 on seed data |
 | Fundraiser rows | A row with `event_type = 'fundraiser'` **must** have `goal_amount` (CHECK enforced, error 3819 — on INSERT *and* UPDATE). Standard events: `goal_amount = NULL`. | Schema integrity |

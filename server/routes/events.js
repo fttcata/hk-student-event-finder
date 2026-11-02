@@ -1,6 +1,6 @@
 import crypto from 'node:crypto'
 import { Router } from 'express'
-import { sendDonationReceipt, sendTicketReceipt } from '../config/email.js'
+import { sendBookingSummary, sendDonationReceipt, sendTicketReceipt } from '../config/email.js'
 import { optionalAuth, requireAuth } from '../middleware/auth.js'
 import { findCategoryById, findCategoryByName } from '../queries/categories.js'
 import { isChatMember, listEventMessages } from '../queries/chat.js'
@@ -12,18 +12,23 @@ import {
   insertEvent,
   listEventRows,
   lockEventForBooking,
+  lockEventForCancellation,
   lockEventRow,
+  releaseSeat,
+  reserveSeats,
   updateEvent,
 } from '../queries/events.js'
 import { insertPledge } from '../queries/pledges.js'
 import {
-  countBookedSeats,
-  findTicketById,
+  cancelTicket,
   insertTicket,
+  listTicketsByCodes,
+  lockTicketsForUsers,
   lockUserTicket,
   reconfirmTicket,
 } from '../queries/tickets.js'
 import { withTransaction } from '../queries/transaction.js'
+import { findUsersByEmails } from '../queries/users.js'
 
 const router = Router()
 
@@ -387,17 +392,20 @@ async function parseEventInput(body) {
 
 const REFERENCE_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
 
-// Receipt codes follow the seed format: <prefix> + 9 uppercase alphanumerics (UNIQUE in both tables).
+// Pledge receipt codes follow the seed format: <prefix> + 9 uppercase alphanumerics (UNIQUE).
 function generateReference(prefix) {
   const bytes = crypto.randomBytes(9)
   return prefix + Array.from(bytes, (byte) => REFERENCE_ALPHABET[byte % REFERENCE_ALPHABET.length]).join('')
 }
 
-// Calls write(referenceCode), retrying with a fresh code on a uq_tickets_reference collision.
-async function withFreshReference(prefix, write) {
+// Calls write(ticketCode) and returns the code, retrying with a fresh UUID on a uq_tickets_code
+// collision. Anything else is a real failure.
+async function withFreshTicketCode(write) {
   for (let attempt = 0; attempt < 3; attempt += 1) {
+    const ticketCode = crypto.randomUUID()
     try {
-      return await write(generateReference(prefix))
+      await write(ticketCode)
+      return ticketCode
     } catch (error) {
       if (error.code !== 'ER_DUP_ENTRY' || attempt === 2) throw error
     }
@@ -418,9 +426,21 @@ router.post('/', requireAuth, async (request, response) => {
   // The organizer gets a free ticket with the event (it does not take a seat), which also lets them into the chat.
   let eventId
   await withTransaction(async (connection) => {
-    eventId = await insertEvent(connection, { ...values, organizer_id: request.user.id, status: 'published' })
-    await withFreshReference('TKT', (referenceCode) =>
-      insertTicket(connection, { userId: request.user.id, eventId, type: 'free', referenceCode, amountPaid: 0 }),
+    eventId = await insertEvent(connection, {
+      ...values,
+      available_tickets: values.capacity,
+      organizer_id: request.user.id,
+      status: 'published',
+    })
+    await withFreshTicketCode((ticketCode) =>
+      insertTicket(connection, {
+        userId: request.user.id,
+        purchasedBy: request.user.id,
+        eventId,
+        type: 'free',
+        ticketCode,
+        amountPaid: 0,
+      }),
     )
   })
 
@@ -490,7 +510,10 @@ router.put('/:id', requireAuth, async (request, response) => {
       }
     }
 
-    await updateEvent(connection, row.id, values)
+    await updateEvent(connection, row.id, {
+      ...values,
+      available_tickets: values.event_type === 'standard' ? values.capacity - row.booked : 0,
+    })
     eventId = row.id
   })
   if (earlyResponse) return response.status(earlyResponse.status).json(earlyResponse.body)
@@ -627,14 +650,7 @@ async function sendBookingEmails({ buyer, event, tickets }) {
   })
   await Promise.all(
     tickets.map((ticket, index) =>
-      pool.query(
-        `INSERT INTO email_log (user_id, type, reference_code, status) VALUES (?, 'booking', ?, ?)`,
-        [
-          ticket.user_id,
-          ticket.ticket_code,
-          ticketResults[index].status === 'fulfilled' ? 'sent' : 'failed',
-        ],
-      ),
+      logEmail(ticket.user_id, 'booking', ticket.ticket_code, ticketResults[index].status === 'fulfilled'),
     ),
   )
 }
@@ -653,7 +669,7 @@ router.post('/:id/tickets', requireAuth, async (request, response) => {
   const { emails, error: attendeeError } = parseAttendees(request.body, request.user.email)
   if (attendeeError) return response.status(400).json({ error: attendeeError })
 
-  let ticketCodes = []
+  const ticketCodes = []
   const earlyResponse = await withTransaction(async (connection) => {
     const event = await lockEventForBooking(connection, eventId)
     if (!event) return { status: 404, body: EVENT_NOT_FOUND }
@@ -672,83 +688,117 @@ router.post('/:id/tickets', requireAuth, async (request, response) => {
       return { status: 409, body: { error: 'This event has already started' } }
     }
 
-    const existing = await lockUserTicket(connection, request.user.id, eventId)
-    if (existing?.status === 'confirmed') {
-      return { status: 409, body: { error: 'You already have a ticket for this event' } }
+    const attendeeRows = await findUsersByEmails(connection, emails)
+    const attendeeByEmail = new Map(attendeeRows.map((row) => [row.email.toLowerCase(), row]))
+    const unknown = emails.filter((email) => !attendeeByEmail.has(email))
+    if (unknown.length) {
+      return { status: 400, body: { error: `Unknown attendee email: ${unknown.join(', ')}` } }
+    }
+    const unverified = emails.filter((email) => !attendeeByEmail.get(email).is_verified)
+    if (unverified.length) {
+      return {
+        status: 403,
+        body: { error: `Attendee has not verified their student email: ${unverified.join(', ')}` },
+      }
     }
     const attendees = emails.map((email) => attendeeByEmail.get(email))
 
-    const booked = await countBookedSeats(connection, eventId, event.organizer_id)
-    if (event.capacity > 0 && booked >= event.capacity) {
-      return { status: 409, body: { error: 'Event is full' } }
-    }
-    await connection.query(
-      'UPDATE events SET available_tickets = available_tickets - ? WHERE id = ?',
-      [attendees.length, eventId],
+    const existingRows = await lockTicketsForUsers(
+      connection,
+      eventId,
+      attendees.map((attendee) => attendee.id),
     )
+    const existingByUser = new Map(existingRows.map((row) => [row.user_id, row]))
+    const alreadyBooked = attendees.filter((attendee) => existingByUser.get(attendee.id)?.status === 'confirmed')
+    if (alreadyBooked.length) {
+      return {
+        status: 409,
+        body: {
+          error: `Already has a ticket for this event: ${alreadyBooked
+            .map((attendee) => attendee.email)
+            .join(', ')}`,
+        },
+      }
+    }
+
+    // The organizer's own ticket does not take a seat.
+    const seats = attendees.filter((attendee) => attendee.id !== event.organizer_id).length
+    if (event.available_tickets < seats) {
+      return {
+        status: 409,
+        body: { error: `Not enough seats left (${event.available_tickets} available)` },
+      }
+    }
+    await reserveSeats(connection, eventId, seats)
 
     const type = event.price > 0 ? 'paid' : 'free'
-    await withFreshReference('TKT', async (referenceCode) => {
-      const fields = { type, referenceCode, amountPaid: event.price }
-      if (existing) {
-        await reconfirmTicket(connection, existing.id, fields)
-        ticketId = existing.id
-      } else {
-        ticketId = await insertTicket(connection, { ...fields, userId: request.user.id, eventId })
-      }
-    })
+    const fields = { purchasedBy: request.user.id, type, amountPaid: event.price }
+    for (const attendee of attendees) {
+      const existing = existingByUser.get(attendee.id)
+      const ticketCode = await withFreshTicketCode((code) =>
+        existing
+          ? reconfirmTicket(connection, existing.id, { ...fields, ticketCode: code })
+          : insertTicket(connection, { ...fields, userId: attendee.id, eventId, ticketCode: code }),
+      )
+      ticketCodes.push(ticketCode)
+    }
   })
   if (earlyResponse) return response.status(earlyResponse.status).json(earlyResponse.body)
 
-  const ticketRow = await findTicketById(ticketId)
-  const ticket = {
-    id: ticketRow.id,
-    ticket_code: ticketRow.reference_code,
-    reference_code: ticketRow.reference_code,
-    event_id: ticketRow.event_id,
-    type: ticketRow.type,
-    status: ticketRow.status,
-    amount_paid: ticketRow.amount_paid,
-    booked_at: ticketRow.created_at,
+  const ticketRows = await listTicketsByCodes(ticketCodes)
+  const tickets = ticketRows.map((row) => ({
+    id: row.id,
+    ticket_code: row.ticket_code,
+    reference_code: row.ticket_code,
+    event_id: row.event_id,
+    user_id: row.user_id,
+    attendee: { id: row.user_id, name: row.holder_name, email: row.holder_email },
+    purchased_by: row.purchased_by,
+    type: row.type,
+    status: row.status,
+    amount_paid: row.amount_paid,
+    booked_at: row.created_at,
+  }))
+  if (tickets.length !== ticketCodes.length) {
+    throw new Error(`Booked ${ticketCodes.length} tickets but read back ${tickets.length}`)
   }
 
   // Re-fetched after commit, so available_tickets reflects this booking.
   const event = await selectEventById(eventId, request.user)
 
-  // The booking is committed, so a mail failure is logged but never fails the request.
-  let emailSent = false
-  try {
-    await sendTicketReceipt({ user: request.user, event, ticket })
-    emailSent = true
-  } catch (error) {
-    console.error(`Ticket receipt ${ticket.reference_code} was not emailed: ${error.message}`)
-  }
-  await logEmail(request.user.id, 'booking', ticket.reference_code, emailSent)
+  // Fire-and-forget: the endpoint returns once the booking is durable, while Nodemailer and the
+  // email_log inserts continue in the background.
+  setImmediate(() => {
+    sendBookingEmails({ buyer: request.user, event, tickets }).catch((error) => {
+      console.error(`Booking emails for ${tickets.map((ticket) => ticket.ticket_code).join(', ')} failed: ${error.message}`)
+    })
+  })
+
+  return response.status(201).json({ tickets, ticket: tickets[0], event, email_queued: true })
+})
+
+// Protected. Cancelling releases the seat and restores the stored counter; the row stays as a
+// receipt (HANDOFF.md §1), so a later rebooking updates it instead of inserting a second row.
+router.delete('/:id/ticket', requireAuth, async (request, response) => {
+  const eventId = parseEventId(request.params.id)
+  if (eventId === null) return response.status(404).json(EVENT_NOT_FOUND)
 
   let cancelled
   const earlyResponse = await withTransaction(async (connection) => {
-    // Same lock order as booking: event first, then the ticket row.
-    const [[event]] = await connection.query(
-      'SELECT id FROM events WHERE id = ? LIMIT 1 FOR UPDATE',
-      [eventId],
-    )
+    const event = await lockEventForCancellation(connection, eventId)
     if (!event) return { status: 404, body: EVENT_NOT_FOUND }
 
-    const [[ticket]] = await connection.query(
-      `SELECT id, ticket_code, status FROM tickets
-       WHERE user_id = ? AND event_id = ? FOR UPDATE`,
-      [request.user.id, eventId],
-    )
+    const ticket = await lockUserTicket(connection, request.user.id, eventId)
     if (!ticket) return { status: 404, body: { error: 'Ticket not found' } }
     if (ticket.status !== 'confirmed') {
       return { status: 409, body: { error: 'Ticket is already cancelled' } }
     }
 
-    await connection.query(`UPDATE tickets SET status = 'cancelled' WHERE id = ?`, [ticket.id])
-    await connection.query(
-      `UPDATE events SET available_tickets = LEAST(available_tickets + 1, capacity) WHERE id = ?`,
-      [eventId],
-    )
+    await cancelTicket(connection, ticket.id)
+    // The organizer's own ticket never held a seat, so there is none to give back.
+    if (ticket.user_id !== event.organizer_id) {
+      await releaseSeat(connection, eventId)
+    }
     cancelled = { id: ticket.id, ticket_code: ticket.ticket_code, status: 'cancelled' }
   })
   if (earlyResponse) return response.status(earlyResponse.status).json(earlyResponse.body)

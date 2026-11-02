@@ -331,17 +331,36 @@ Body 'race.json' '{}'
 $race1 = Start-Job -ScriptBlock { param($id, $tok, $f, $o) curl.exe -s -o $o -w "%{http_code}" -X POST "http://localhost:5000/api/events/$id/tickets" -H "Content-Type: application/json" --data-binary "@$f" -H "Authorization: Bearer $tok" } -ArgumentList $race, $buyer.token, "$dir\race.json", "$dir\raceA.json"
 $race2 = Start-Job -ScriptBlock { param($id, $tok, $f, $o) curl.exe -s -o $o -w "%{http_code}" -X POST "http://localhost:5000/api/events/$id/tickets" -H "Content-Type: application/json" --data-binary "@$f" -H "Authorization: Bearer $tok" } -ArgumentList $race, $other.token, "$dir\race.json", "$dir\raceB.json"
 Wait-Job $race1, $race2 | Out-Null
-"race -> $(Receive-Job $race1) / $(Receive-Job $race2)"   # one 201 and one 409
+"race -> $(Receive-Job $race1) / $(Receive-Job $race2)   # one 201 and one 409"
 
-# rebooking confirms the same cancelled row (UNIQUE user+event), never a second INSERT
-docker compose exec mysql mysql -uroot -proot_password student_events -e "UPDATE tickets SET status='cancelled' WHERE user_id=$($book1.user.id) AND event_id=$free;"
-Book $free $book1.token 201 'rebook after cancel'
+# Cancel f1's paid ticket, then have another buyer rebook it
+$oldRow = (Sql "SELECT id FROM tickets WHERE user_id=$($f1.user.id) AND event_id=$paid").Trim()
+Call 'DELETE' "/events/$paid/ticket" $null $f1.token | Out-Null
+"paid availability after cancel -> $((Sql "SELECT available_tickets FROM events WHERE id=$paid").Trim())   # 1"
+Call 'DELETE' "/events/$paid/ticket" $null $f1.token | Out-Null   # 409 double cancel
+Book $paid $other.token (Attendees @($f1.user.email)) 201 'other rebooks cancelled f1 seat'
+$newRow = (Sql "SELECT id FROM tickets WHERE user_id=$($f1.user.id) AND event_id=$paid").Trim()
+"rebook row -> old $oldRow / new $newRow   # same id; new UUID; purchased_by is now other"
+"paid availability after rebook -> $((Sql "SELECT available_tickets FROM events WHERE id=$paid").Trim())   # 0"
 
-# DB checks: one confirmed race row, ticket/code columns, email_log booking entries
-docker compose exec mysql mysql -uroot -proot_password student_events -e "SELECT id,user_id,event_id,type,status,reference_code,amount_paid FROM tickets WHERE event_id IN ($free,$race,$paid); SELECT COUNT(*) AS confirmed_race_seats FROM tickets WHERE event_id=$race AND status='confirmed' AND user_id<>$($org.user.id); SELECT type,status,reference_code FROM email_log WHERE reference_code LIKE 'TKT%' ORDER BY id DESC LIMIT 5;"
+# DB checks: holder vs buyer, paid amounts, counters, one race seat, UUID email_log rows
+Sql "SELECT id,user_id,purchased_by,event_id,status,ticket_code,amount_paid FROM tickets WHERE event_id IN ($free,$paid,$tiny,$race) ORDER BY id"
+Sql "SELECT id,capacity,available_tickets FROM events WHERE id IN ($free,$paid,$tiny,$race) ORDER BY id"
+Sql "SELECT COUNT(*) AS confirmed_race_seats FROM tickets WHERE event_id=$race AND status='confirmed' AND user_id<>$($org.user.id)"
+Sql "SELECT COUNT(*) AS booking_emails FROM email_log WHERE user_id IN ($($buyer.user.id),$($f1.user.id),$($f2.user.id),$($other.user.id)) AND type='booking' AND CHAR_LENGTH(reference_code)=36"
 
-# cleanup: tickets first (FK RESTRICT), then events, then users
-docker compose exec mysql mysql -uroot -proot_password student_events -e "DELETE FROM tickets WHERE event_id IN (SELECT id FROM events WHERE organizer_id=$($org.user.id)); DELETE FROM events WHERE organizer_id=$($org.user.id); DELETE FROM users WHERE email IN ('org.tickets@connect.hku.hk','ticket1@connect.hku.hk','ticket2@connect.hku.hk','unverified.tickets@connect.hku.hk');"
+# Receipts are queued in the background: poll briefly before asserting the rows exist
+$deadline = (Get-Date).AddSeconds(10)
+do {
+  Start-Sleep -Milliseconds 200
+  $emails = [int](Sql "SELECT COUNT(*) FROM email_log WHERE user_id IN ($($buyer.user.id),$($f1.user.id),$($f2.user.id),$($other.user.id)) AND type='booking'").Trim()
+} while ($emails -lt 10 -and (Get-Date) -lt $deadline)
+"booking emails -> $emails/10   # failed without SMTP, sent with Mailtrap credentials"
+
+# Cleanup: tickets first (FK RESTRICT), then events, then users
+Sql "DELETE FROM tickets WHERE event_id IN (SELECT id FROM events WHERE organizer_id=$($org.user.id))" | Out-Null
+Sql "DELETE FROM events WHERE organizer_id=$($org.user.id)" | Out-Null
+Sql "DELETE FROM users WHERE email IN ('org.group@connect.hku.hk','buyer.group@connect.hku.hk','friend1.group@connect.hku.hk','friend2.group@connect.hku.hk','other.group@connect.hku.hk','unverified.group@connect.hku.hk')" | Out-Null
 ```
 
 Expected: `401`/`403` gates, `201` for the single free seat, two friend seats, paid group,

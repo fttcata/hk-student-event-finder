@@ -23,6 +23,11 @@ export async function findUserWithPasswordByEmail(email) {
   return row ?? null
 }
 
+export async function findUsersByEmails(connection, emails) {
+  const [rows] = await connection.query(`SELECT id, name, email, is_verified FROM users WHERE email IN (?)`, [emails])
+  return rows
+}
+
 // Returns whether the code matched a user who was still unverified.
 export async function markUserVerified(email, code) {
   const [result] = await pool.query(
