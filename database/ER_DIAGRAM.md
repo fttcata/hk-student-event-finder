@@ -57,6 +57,12 @@ erDiagram
         decimal goal_amount "CHECK: required if fundraiser"
         enum status "draft|published|cancelled"
         varchar image_url
+        varchar source "NULL = created in this app"
+        varchar source_id "UK with source"
+        varchar source_url
+        varchar source_organizer
+        varchar fee_text
+        datetime end_date
         timestamp created_at
         timestamp updated_at
     }
@@ -138,3 +144,5 @@ erDiagram
 - Fundraiser progress is computed live: `SELECT COALESCE(SUM(amount),0) FROM pledges WHERE event_id = ?`
 - `pledges` has no `UNIQUE(user_id, event_id)` — repeat donations are allowed by design
 - Chat time-window rules (open T-6h, close +7d) are enforced in Express middleware, not in SQL
+- `events.source` marks scraped events (`NULL` = created in this app). They are owned by a system user,
+  stay out of the default `GET /api/events` list (`?source=external` returns them) and are read-only in the API

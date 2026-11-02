@@ -12,6 +12,7 @@ const EVENT_SELECT = `
          e.event_type, e.status, e.image_url, e.event_date, e.registration_deadline,
          e.location, e.address, e.latitude, e.longitude,
          e.capacity, e.available_tickets, e.price, e.goal_amount, e.created_at,
+         e.source, e.source_url, e.source_organizer, e.fee_text, e.end_date,
          u.id AS organizer_id, u.name AS organizer_name, u.email AS organizer_email,
          u.role AS organizer_role, u.student_id AS organizer_student_id,
          u.university AS organizer_university, u.is_verified AS organizer_is_verified,
@@ -29,9 +30,16 @@ function escapeLike(value) {
 }
 
 // Shared WHERE builder for the list query and the total-count query. Filters are already validated.
-function buildEventFilters({ search, categoryId, eventType, price, availability }) {
+function buildEventFilters({ source, search, categoryId, eventType, price, availability }) {
   const conditions = [`e.status = 'published'`]
   const params = []
+
+  // Scraped events have their own section and only appear there until they end.
+  if (source === 'external') {
+    conditions.push('e.source IS NOT NULL', 'COALESCE(e.end_date, e.event_date) >= NOW()')
+  } else {
+    conditions.push('e.source IS NULL')
+  }
 
   if (search) {
     const pattern = `%${escapeLike(search)}%`
@@ -89,10 +97,10 @@ export async function lockEventRow(connection, eventId) {
   return row ?? null
 }
 
-// The few columns the donation and chat rules look at.
+// The few columns the donation, chat and read-only rules look at.
 export async function findEventStatus(eventId) {
   const [[event]] = await pool.query(
-    `SELECT event_type, status, event_date FROM events WHERE id = ? AND status <> 'draft'`,
+    `SELECT event_type, status, event_date, source FROM events WHERE id = ? AND status <> 'draft'`,
     [eventId],
   )
   return event ?? null
@@ -138,4 +146,22 @@ export async function updateEvent(connection, eventId, values) {
 
 export async function cancelEvent(connection, eventId) {
   await connection.query(`UPDATE events SET status = 'cancelled' WHERE id = ?`, [eventId])
+}
+
+// Inserts a scraped event, or refreshes the row uq_events_source finds. Setting status here
+// brings back an event that a previous scrape cancelled.
+export async function upsertScrapedEvent(values) {
+  const { source, source_id, organizer_id, ...changes } = values
+  await pool.query('INSERT INTO events SET ? ON DUPLICATE KEY UPDATE ?', [values, changes])
+}
+
+// Events that have not ended but are gone from the website were taken down by their organizer.
+export async function cancelMissingScrapedEvents(source, listedIds) {
+  const [result] = await pool.query(
+    `UPDATE events SET status = 'cancelled'
+     WHERE source = ? AND status = 'published' AND source_id NOT IN (?)
+       AND COALESCE(end_date, event_date) >= NOW()`,
+    [source, listedIds],
+  )
+  return result.affectedRows
 }
