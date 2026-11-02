@@ -13,7 +13,8 @@ const DEFAULT_PAGE = 1
 const DEFAULT_LIMIT = 12
 const MAX_LIMIT = 50
 
-// Ticket counts and fundraiser totals are computed live (see HANDOFF.md §1) — never stored.
+// Booked counts and fundraiser totals are computed live; available_tickets is the stored booking
+// counter that the booking/cancellation transactions maintain under the event row lock.
 const BOOKED_TICKETS_SQL = `(SELECT COUNT(*) FROM tickets t WHERE t.event_id = e.id AND t.status = 'confirmed')`
 
 // One SELECT for every endpoint that returns events, so list, detail and create share a shape.
@@ -21,7 +22,7 @@ const EVENT_SELECT = `
   SELECT e.id, e.title, e.description, e.category_id, c.name AS category,
          e.event_type, e.status, e.image_url, e.event_date, e.registration_deadline,
          e.location, e.address, e.latitude, e.longitude,
-         e.capacity, e.price, e.goal_amount, e.created_at,
+         e.capacity, e.available_tickets, e.price, e.goal_amount, e.created_at,
          u.id AS organizer_id, u.name AS organizer_name, u.email AS organizer_email,
          u.role AS organizer_role, u.student_id AS organizer_student_id,
          u.university AS organizer_university, u.is_verified AS organizer_is_verified,
@@ -47,8 +48,8 @@ function serializeOrganizer(row, viewer) {
 }
 
 function serializeEvent(row, viewer) {
-  // capacity = 0 means unlimited seats.
-  const remaining = row.capacity > 0 ? Math.max(row.capacity - row.booked, 0) : null
+  // capacity = 0 means unlimited seats; standard events keep a stored available_tickets counter.
+  const remaining = row.capacity > 0 ? row.available_tickets : null
   const goal = row.goal_amount
   const coordinates =
     row.latitude != null && row.longitude != null ? { latitude: row.latitude, longitude: row.longitude } : null
@@ -160,9 +161,9 @@ function buildEventFilters(query) {
   }
   // capacity = 0 means unlimited seats, so those events are never sold out.
   if (availability === 'available') {
-    conditions.push(`(e.capacity = 0 OR ${BOOKED_TICKETS_SQL} < e.capacity)`)
+    conditions.push('(e.capacity = 0 OR e.available_tickets > 0)')
   } else if (availability === 'sold_out') {
-    conditions.push(`(e.capacity > 0 AND ${BOOKED_TICKETS_SQL} >= e.capacity)`)
+    conditions.push('(e.capacity > 0 AND e.available_tickets = 0)')
   }
 
   return { where: conditions.join(' AND '), params }
@@ -406,7 +407,12 @@ router.post('/', requireAuth, async (request, response) => {
 
   // SET ? expands the column-keyed object (mysql2 escapes every value).
   const [result] = await pool.query('INSERT INTO events SET ?', [
-    { ...values, organizer_id: request.user.id, status: 'published' },
+    {
+      ...values,
+      available_tickets: values.capacity,
+      organizer_id: request.user.id,
+      status: 'published',
+    },
   ])
 
   const event = await selectEventById(result.insertId, request.user)
@@ -501,7 +507,13 @@ router.put('/:id', requireAuth, async (request, response) => {
       }
     }
 
-    await connection.query('UPDATE events SET ? WHERE id = ?', [values, row.id])
+    await connection.query('UPDATE events SET ? WHERE id = ?', [
+      {
+        ...values,
+        available_tickets: values.event_type === 'standard' ? values.capacity - row.booked : 0,
+      },
+      row.id,
+    ])
     eventId = row.id
   })
   if (earlyResponse) return response.status(earlyResponse.status).json(earlyResponse.body)
@@ -638,9 +650,39 @@ function parseAttendees(body, buyerEmail) {
   return { emails }
 }
 
+// Sends receipts after the booking has committed. Called without awaiting so the HTTP response
+// is not held open by SMTP; every ticket outcome is still recorded in email_log.
+async function sendBookingEmails({ buyer, event, tickets }) {
+  const sends = tickets.map((ticket) => sendTicketReceipt({ user: ticket.attendee, event, ticket }))
+  const buyerIsAttendee = tickets.some((ticket) => ticket.user_id === buyer.id)
+  if (!buyerIsAttendee) {
+    sends.push(sendBookingSummary({ user: buyer, event, tickets }))
+  }
+  const results = await Promise.allSettled(sends)
+  const ticketResults = results.slice(0, tickets.length)
+  results.forEach((result, index) => {
+    if (result.status === 'rejected') {
+      const label = tickets[index]?.ticket_code ?? 'booking summary'
+      console.error(`Ticket receipt ${label} was not emailed: ${result.reason?.message ?? result.reason}`)
+    }
+  })
+  await Promise.all(
+    tickets.map((ticket, index) =>
+      pool.query(
+        `INSERT INTO email_log (user_id, type, reference_code, status) VALUES (?, 'booking', ?, ?)`,
+        [
+          ticket.user_id,
+          ticket.ticket_code,
+          ticketResults[index].status === 'fulfilled' ? 'sent' : 'failed',
+        ],
+      ),
+    ),
+  )
+}
+
 // Protected, verified students only (HANDOFF.md §1). Each attendee gets their own ticket row and
-// code; purchased_by records the buyer. Seats are computed live, so the capacity check and every
-// insert/update run while the event row is locked.
+// code; purchased_by records the buyer. Seats are a stored counter, so the capacity check,
+// decrement, and every insert/update run while the event row is locked.
 router.post('/:id/tickets', requireAuth, async (request, response) => {
   if (!request.user.is_verified) {
     return response.status(403).json({ error: 'Verify your student email before booking tickets' })
@@ -656,7 +698,7 @@ router.post('/:id/tickets', requireAuth, async (request, response) => {
   const earlyResponse = await withTransaction(async (connection) => {
     // FOR UPDATE serializes concurrent bookings for this event until this transaction commits.
     const [[event]] = await connection.query(
-      `SELECT id, event_type, status, capacity, price, event_date, registration_deadline
+      `SELECT id, event_type, status, capacity, available_tickets, price, event_date, registration_deadline
        FROM events WHERE id = ? AND status <> 'draft' LIMIT 1 FOR UPDATE`,
       [eventId],
     )
@@ -713,39 +755,41 @@ router.post('/:id/tickets', requireAuth, async (request, response) => {
       }
     }
 
-    const [[{ booked }]] = await connection.query(
-      `SELECT COUNT(*) AS booked FROM tickets WHERE event_id = ? AND status = 'confirmed'`,
-      [eventId],
-    )
-    if (event.capacity > 0 && booked + attendees.length > event.capacity) {
-      const available = Math.max(event.capacity - booked, 0)
-      return { status: 409, body: { error: `Not enough seats left (${available} available)` } }
+    if (event.available_tickets < attendees.length) {
+      return {
+        status: 409,
+        body: { error: `Not enough seats left (${event.available_tickets} available)` },
+      }
     }
+    await connection.query(
+      'UPDATE events SET available_tickets = available_tickets - ? WHERE id = ?',
+      [attendees.length, eventId],
+    )
 
     const type = event.price > 0 ? 'paid' : 'free'
     for (const attendee of attendees) {
       const existing = existingByUser.get(attendee.id)
       // A cancelled ticket keeps its row (UNIQUE user+event), so rebooking confirms it again.
       for (let attempt = 0; attempt < 3; attempt += 1) {
-        const referenceCode = generateReference('TKT')
+        const ticketCode = crypto.randomUUID()
         try {
           if (existing) {
             await connection.query(
               `UPDATE tickets SET purchased_by = ?, type = ?, status = 'confirmed',
-                 reference_code = ?, amount_paid = ? WHERE id = ?`,
-              [request.user.id, type, referenceCode, event.price, existing.id],
+                 ticket_code = ?, amount_paid = ? WHERE id = ?`,
+              [request.user.id, type, ticketCode, event.price, existing.id],
             )
           } else {
             await connection.query(
-              `INSERT INTO tickets (user_id, purchased_by, event_id, type, status, reference_code, amount_paid)
+              `INSERT INTO tickets (user_id, purchased_by, event_id, type, status, ticket_code, amount_paid)
                VALUES (?, ?, ?, ?, 'confirmed', ?, ?)`,
-              [attendee.id, request.user.id, eventId, type, referenceCode, event.price],
+              [attendee.id, request.user.id, eventId, type, ticketCode, event.price],
             )
           }
-          ticketCodes.push(referenceCode)
+          ticketCodes.push(ticketCode)
           break
         } catch (error) {
-          // uq_tickets_reference collision: generate a fresh code. Anything else is a real failure.
+          // uq_tickets_code collision: generate a fresh code. Anything else is a real failure.
           if (error.code !== 'ER_DUP_ENTRY' || attempt === 2) throw error
         }
       }
@@ -754,18 +798,18 @@ router.post('/:id/tickets', requireAuth, async (request, response) => {
   if (earlyResponse) return response.status(earlyResponse.status).json(earlyResponse.body)
 
   const [ticketRows] = await pool.query(
-    `SELECT t.id, t.user_id, t.purchased_by, t.event_id, t.type, t.status, t.reference_code,
+    `SELECT t.id, t.user_id, t.purchased_by, t.event_id, t.type, t.status, t.ticket_code,
             t.amount_paid, t.created_at, u.name AS holder_name, u.email AS holder_email
      FROM tickets t
      JOIN users u ON u.id = t.user_id
-     WHERE t.reference_code IN (?)
+     WHERE t.ticket_code IN (?)
      ORDER BY t.id ASC`,
     [ticketCodes],
   )
   const tickets = ticketRows.map((row) => ({
     id: row.id,
-    ticket_code: row.reference_code,
-    reference_code: row.reference_code,
+    ticket_code: row.ticket_code,
+    reference_code: row.ticket_code,
     event_id: row.event_id,
     user_id: row.user_id,
     attendee: { id: row.user_id, name: row.holder_name, email: row.holder_email },
@@ -782,37 +826,55 @@ router.post('/:id/tickets', requireAuth, async (request, response) => {
   // Re-fetched after commit, so available_tickets reflects this booking.
   const event = await selectEventById(eventId, request.user)
 
-  // The booking is committed, so mail failures are logged but never fail the request.
-  const sends = tickets.map((ticket) => sendTicketReceipt({ user: ticket.attendee, event, ticket }))
-  const buyerIsAttendee = emails.includes(request.user.email.toLowerCase())
-  if (!buyerIsAttendee) {
-    sends.push(sendBookingSummary({ user: request.user, event, tickets }))
-  }
-  const results = await Promise.allSettled(sends)
-  const ticketResults = results.slice(0, tickets.length)
-  const emailSent = results.every((result) => result.status === 'fulfilled')
-  results.forEach((result, index) => {
-    if (result.status === 'rejected') {
-      const label = tickets[index]?.reference_code ?? 'booking summary'
-      console.error(`Ticket receipt ${label} was not emailed: ${result.reason?.message ?? result.reason}`)
-    }
+  // Fire-and-forget: the endpoint returns once the booking is durable, while Nodemailer and the
+  // email_log inserts continue in the background.
+  setImmediate(() => {
+    sendBookingEmails({ buyer: request.user, event, tickets }).catch((error) => {
+      console.error(`Booking emails for ${tickets.map((ticket) => ticket.ticket_code).join(', ')} failed: ${error.message}`)
+    })
   })
-  await Promise.all(
-    tickets.map((ticket, index) =>
-      pool.query(
-        `INSERT INTO email_log (user_id, type, reference_code, status) VALUES (?, 'booking', ?, ?)`,
-        [
-          ticket.user_id,
-          ticket.reference_code,
-          ticketResults[index].status === 'fulfilled' ? 'sent' : 'failed',
-        ],
-      ),
-    ),
-  )
 
   return response
     .status(201)
-    .json({ tickets, ticket: tickets[0], event, receipt_email_sent: emailSent })
+    .json({ tickets, ticket: tickets[0], event, email_queued: true })
+})
+
+// Protected. Cancelling releases the seat and restores the stored counter; the row stays as a
+// receipt (HANDOFF.md §1), so a later rebooking updates it instead of inserting a second row.
+router.delete('/:id/ticket', requireAuth, async (request, response) => {
+  const eventId = parseEventId(request.params.id)
+  if (eventId === null) return response.status(404).json(EVENT_NOT_FOUND)
+
+  let cancelled
+  const earlyResponse = await withTransaction(async (connection) => {
+    // Same lock order as booking: event first, then the ticket row.
+    const [[event]] = await connection.query(
+      'SELECT id FROM events WHERE id = ? LIMIT 1 FOR UPDATE',
+      [eventId],
+    )
+    if (!event) return { status: 404, body: EVENT_NOT_FOUND }
+
+    const [[ticket]] = await connection.query(
+      `SELECT id, ticket_code, status FROM tickets
+       WHERE user_id = ? AND event_id = ? FOR UPDATE`,
+      [request.user.id, eventId],
+    )
+    if (!ticket) return { status: 404, body: { error: 'Ticket not found' } }
+    if (ticket.status !== 'confirmed') {
+      return { status: 409, body: { error: 'Ticket is already cancelled' } }
+    }
+
+    await connection.query(`UPDATE tickets SET status = 'cancelled' WHERE id = ?`, [ticket.id])
+    await connection.query(
+      `UPDATE events SET available_tickets = LEAST(available_tickets + 1, capacity) WHERE id = ?`,
+      [eventId],
+    )
+    cancelled = { id: ticket.id, ticket_code: ticket.ticket_code, status: 'cancelled' }
+  })
+  if (earlyResponse) return response.status(earlyResponse.status).json(earlyResponse.body)
+
+  const event = await selectEventById(eventId, request.user)
+  return response.status(200).json({ ticket: cancelled, event })
 })
 
 export default router

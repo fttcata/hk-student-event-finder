@@ -71,14 +71,14 @@ export async function sendTicketReceipt({ user, event, ticket }) {
   return transporter.sendMail({
     from: FROM,
     to: user.email,
-    subject: `Ticket confirmed ${ticket.reference_code} — ${event.title}`,
-    html: generateTicketEmailHTML(user.name, event.title, ticket.reference_code, ticket.amount_paid, new Date(event.date).toISOString()),
+    subject: `Ticket confirmed ${ticket.ticket_code} — ${event.title}`,
+    html: generateTicketEmailHTML(user.name, event.title, ticket.ticket_code, ticket.amount_paid, new Date(event.date).toISOString()),
     text: [
       `Hi ${user.name},`,
       '',
       `Your ticket for "${event.title}" is confirmed.`,
       '',
-      `Ticket code: ${ticket.reference_code}`,
+      `Ticket code: ${ticket.ticket_code}`,
       `Type: ${ticket.type}`,
       `Date: ${new Date(event.date).toISOString()}`,
       `Location: ${event.location}`,
@@ -107,7 +107,7 @@ export async function sendBookingSummary({ user, event, tickets }) {
       '',
       ...tickets.map(
         (ticket) =>
-          `${ticket.reference_code} — ${ticket.attendee.name} <${ticket.attendee.email}>`,
+          `${ticket.ticket_code} — ${ticket.attendee.name} <${ticket.attendee.email}>`,
       ),
       '',
       `Event date: ${new Date(event.date).toISOString()}`,

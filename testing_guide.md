@@ -143,10 +143,11 @@ GetApi '/events?page=0'
 GetApi '/events?limit=51'
 ```
 
-To prove the `sold_out` filter hits, insert a throwaway capacity-1 event with one
-confirmed ticket, re-run `availability=sold_out` (expect 1 row,
-`available_tickets: 0`), then delete the ticket first and the event second —
-`tickets → events` is `ON DELETE RESTRICT`, so deleting the event first fails with 1451.
+To prove the `sold_out` filter hits, insert a throwaway capacity-1 event with
+`available_tickets = 0` and one confirmed ticket (or create it through the API and book
+the seat), re-run `availability=sold_out` (expect 1 row, `available_tickets: 0`), then delete
+the ticket first and the event second — `tickets → events` is `ON DELETE RESTRICT`, so deleting
+the event first fails with 1451.
 
 ## 9. Create event tests (`POST /api/events`, protected)
 
@@ -217,10 +218,13 @@ the token user, fundraiser rows have `goal_amount` set and `capacity = 0`.
 > themselves or book seats only for other students: `user_id` is the holder and `purchased_by`
 > is the buyer. Send up to four attendee emails (`{ "attendees": [...] }`). `quantity` alone
 > still works for one self-booked seat, but `quantity > 1` without `attendees` is a 400.
-> Seats remain capacity minus confirmed tickets (`capacity = 0` means unlimited). The
-> `UNIQUE(user_id, event_id)` rule still allows one seat per holder, so a cancelled ticket is
-> re-confirmed with an UPDATE, never a second INSERT. The client checkout currently sends only
-> `quantity`; buying more than one seat from the UI needs the attendee-email inputs.
+> Standard events keep a stored `events.available_tickets` counter (fundraisers have
+> `capacity = 0` and unlimited seats). Booking decrements it by the group size; cancellation
+> restores it. The `UNIQUE(user_id, event_id)` rule still allows one seat per holder, so a
+> cancelled ticket is re-confirmed with an UPDATE, never a second INSERT. Ticket codes are
+> UUIDs and receipts are sent in the background (`email_queued: true`). The client checkout
+> currently sends only `quantity`; buying more than one seat from the UI needs attendee-email
+> inputs.
 
 ```powershell
 $dir = "$env:TEMP\grouptickettests"; New-Item -ItemType Directory -Force -Path $dir | Out-Null
@@ -233,7 +237,7 @@ function Call($method, $path, $file, $auth) {
   $code = curl.exe -s -o "$dir\out.json" -w "%{http_code}" -X $method "$api$path" @headers
   @{ code = "$code"; body = Get-Content "$dir\out.json" -Raw }
 }
-function Sql($query) { (docker compose exec -T mysql mysql -uroot -proot_password student_events -N -e $query) -join "`n" }
+function Sql($query) { (docker compose exec -T -e MYSQL_PWD=root_password mysql mysql -uroot student_events -N -e $query) -join "`n" }
 function Check($result, $expect, $label) {
   $mark = if ($result.code -eq "$expect") { 'PASS' } else { "FAIL (expected $expect)" }
   "[$mark] $label -> $($result.code)  $($result.body)"
@@ -294,7 +298,10 @@ Book 'abc' $buyer.token '{}' 404 'non-numeric id'
 Book '999999' $buyer.token '{}' 404 'missing event'
 
 # Single ticket for self (backward-compatible quantity path)
-Book $free $buyer.token '{"quantity":1}' 201 'buyer books one seat for self'   # available 4
+$single = Book $free $buyer.token '{"quantity":1}' 201 'buyer books one seat for self'
+$singleBody = $single.body | ConvertFrom-Json
+"single code -> $($singleBody.ticket.ticket_code)   # UUID; email_queued = $($singleBody.email_queued)"
+"single availability -> $($singleBody.event.available_tickets) (database: $((Sql "SELECT available_tickets FROM events WHERE id=$free").Trim()))"
 Book $free $buyer.token '{"quantity":1}' 409 'buyer already holds a seat'
 
 # Validation
@@ -306,7 +313,10 @@ Book $free $buyer.token (Attendees @($f1.user.email, $f2.user.email) 3) 400 'qua
 Book $free $buyer.token (Attendees @($f1.user.email, $f2.user.email, $other.user.email, $buyer.user.email, $org.user.email)) 400 'more than four attendees'
 
 # Buyer books for two friends (buyer is not in the attendee list)
-Book $free $other.token (Attendees @($f1.user.email, $f2.user.email)) 201 'other buys two seats for friends'
+$group = Book $free $other.token (Attendees @($f1.user.email, $f2.user.email)) 201 'other buys two seats for friends'
+$groupBody = $group.body | ConvertFrom-Json
+"group codes -> $($groupBody.tickets.ticket_code -join ', ')   # two distinct UUIDs"
+"group availability -> $($groupBody.event.available_tickets)   # 2"
 
 # Buyer books three seats including themselves on a paid event
 Book $paid $buyer.token (Attendees @($buyer.user.email, $f1.user.email, $f2.user.email)) 201 'paid group of three'
@@ -325,15 +335,27 @@ Wait-Job $race1, $race2 | Out-Null
 
 # Cancel f1's paid ticket, then have another buyer rebook it
 $oldRow = (Sql "SELECT id FROM tickets WHERE user_id=$($f1.user.id) AND event_id=$paid").Trim()
-Sql "UPDATE tickets SET status='cancelled' WHERE id=$oldRow" | Out-Null
+Call 'DELETE' "/events/$paid/ticket" $null $f1.token | Out-Null
+"paid availability after cancel -> $((Sql "SELECT available_tickets FROM events WHERE id=$paid").Trim())   # 1"
+Call 'DELETE' "/events/$paid/ticket" $null $f1.token | Out-Null   # 409 double cancel
 Book $paid $other.token (Attendees @($f1.user.email)) 201 'other rebooks cancelled f1 seat'
 $newRow = (Sql "SELECT id FROM tickets WHERE user_id=$($f1.user.id) AND event_id=$paid").Trim()
-"rebook row -> old $oldRow / new $newRow   # same id; purchased_by is now other"
+"rebook row -> old $oldRow / new $newRow   # same id; new UUID; purchased_by is now other"
+"paid availability after rebook -> $((Sql "SELECT available_tickets FROM events WHERE id=$paid").Trim())   # 0"
 
-# DB checks: holder vs buyer, paid amounts, one race seat, email_log per ticket
-Sql "SELECT id,user_id,purchased_by,event_id,status,reference_code,amount_paid FROM tickets WHERE event_id IN ($free,$paid,$tiny,$race) ORDER BY id"
+# DB checks: holder vs buyer, paid amounts, counters, one race seat, UUID email_log rows
+Sql "SELECT id,user_id,purchased_by,event_id,status,ticket_code,amount_paid FROM tickets WHERE event_id IN ($free,$paid,$tiny,$race) ORDER BY id"
+Sql "SELECT id,capacity,available_tickets FROM events WHERE id IN ($free,$paid,$tiny,$race) ORDER BY id"
 Sql "SELECT COUNT(*) AS confirmed_race_seats FROM tickets WHERE event_id=$race AND status='confirmed'"
-Sql "SELECT COUNT(*) AS booking_emails FROM email_log WHERE reference_code LIKE 'TKT%'"
+Sql "SELECT COUNT(*) AS booking_emails FROM email_log WHERE user_id IN ($($buyer.user.id),$($f1.user.id),$($f2.user.id),$($other.user.id)) AND type='booking' AND CHAR_LENGTH(reference_code)=36"
+
+# Receipts are queued in the background: poll briefly before asserting the rows exist
+$deadline = (Get-Date).AddSeconds(10)
+do {
+  Start-Sleep -Milliseconds 200
+  $emails = [int](Sql "SELECT COUNT(*) FROM email_log WHERE user_id IN ($($buyer.user.id),$($f1.user.id),$($f2.user.id),$($other.user.id)) AND type='booking'").Trim()
+} while ($emails -lt 10 -and (Get-Date) -lt $deadline)
+"booking emails -> $emails/10   # failed without SMTP, sent with Mailtrap credentials"
 
 # Cleanup: tickets first (FK RESTRICT), then events, then users
 Sql "DELETE FROM tickets WHERE event_id IN ($free,$paid,$tiny,$race)" | Out-Null
@@ -345,10 +367,12 @@ Expected: `401`/`403` gates, `201` for the single free seat, two friend seats, p
 tiny group, and rebook; `400` for unknown/unverified/duplicate attendees and quantity misuse;
 `409` for duplicate holder, capacity overflow, closed/cancelled events; `404` for bad ids.
 The three paid tickets total HK$60 with `available_tickets = 0`; the free event ends with
-`available_tickets = 2`; exactly one race seat is confirmed; rebooking reuses the same row id
-and changes `purchased_by`. Receipt emails depend on SMTP: without `server/.env` credentials
-`receipt_email_sent` is `false`, every ticket still gets an `email_log` `booking` row marked
-`failed`, and with Mailtrap credentials those rows become `sent`.
+`available_tickets = 2`; exactly one race seat is confirmed. Every ticket code is a UUID,
+`reference_code` aliases it for older clients, and cancellation through
+`DELETE /events/:id/ticket` restores one seat before rebooking consumes it again. Receipts are
+sent in the background: without `server/.env` SMTP credentials the responses still include
+`email_queued: true`, all `email_log` rows appear as `failed`, and with Mailtrap credentials
+those rows become `sent`.
 
 ## 11. Teardown
 

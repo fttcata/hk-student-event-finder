@@ -52,6 +52,7 @@ erDiagram
         datetime registration_deadline
         enum event_type "standard|fundraiser"
         int capacity
+        int available_tickets "stored counter; 0 for fundraisers"
         decimal price
         decimal goal_amount "CHECK: required if fundraiser"
         enum status "draft|published|cancelled"
@@ -67,7 +68,7 @@ erDiagram
         int event_id FK
         enum type "free|paid"
         enum status "confirmed|cancelled"
-        varchar reference_code UK
+        varchar ticket_code UK "UUID"
         decimal amount_paid
         timestamp created_at
     }
@@ -131,6 +132,8 @@ erDiagram
   user or event — cancel events via `status` instead); every other FK uses `ON DELETE CASCADE`
 - `tickets.user_id` is the attendee/holder; `tickets.purchased_by` is the student who paid, so one buyer
   can book seats for several registered students. `UNIQUE(user_id, event_id)` still applies per holder.
+- `events.available_tickets` is the stored booking counter for standard events; booking decrements it
+  and cancellation restores it inside the event-row lock. Fundraisers keep it at `0` (unlimited).
 - All `DATETIME`/`TIMESTAMP` values are UTC (`event_date` is the start instant, not just a day)
 - Fundraiser progress is computed live: `SELECT COALESCE(SUM(amount),0) FROM pledges WHERE event_id = ?`
 - `pledges` has no `UNIQUE(user_id, event_id)` — repeat donations are allowed by design

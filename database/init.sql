@@ -37,6 +37,8 @@ CREATE TABLE IF NOT EXISTS events (
   registration_deadline DATETIME NULL,
   event_type ENUM('standard', 'fundraiser') NOT NULL DEFAULT 'standard',
   capacity INT UNSIGNED NOT NULL DEFAULT 0,
+  -- Stored counter, decremented by the booking transaction and restored on cancellation.
+  available_tickets INT UNSIGNED NOT NULL DEFAULT 0,
   price DECIMAL(8,2) NOT NULL DEFAULT 0.00,
   goal_amount DECIMAL(10,2) NULL,
   status ENUM('draft', 'published', 'cancelled') NOT NULL DEFAULT 'published',
@@ -69,12 +71,12 @@ CREATE TABLE IF NOT EXISTS tickets (
   event_id INT UNSIGNED NOT NULL,
   type ENUM('free', 'paid') NOT NULL DEFAULT 'free',
   status ENUM('confirmed', 'cancelled') NOT NULL DEFAULT 'confirmed',
-  reference_code VARCHAR(24) NOT NULL,
+  ticket_code VARCHAR(36) NOT NULL,
   amount_paid DECIMAL(8,2) NOT NULL DEFAULT 0.00,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   UNIQUE KEY uq_tickets_user_event (user_id, event_id),
-  UNIQUE KEY uq_tickets_reference (reference_code),
+  UNIQUE KEY uq_tickets_code (ticket_code),
   -- RESTRICT: tickets are receipts; they must outlive neither their event nor their holder by accident.
   CONSTRAINT fk_tickets_user
     FOREIGN KEY (user_id) REFERENCES users (id)
@@ -150,7 +152,7 @@ CREATE TABLE IF NOT EXISTS email_log (
   id INT UNSIGNED NOT NULL AUTO_INCREMENT,
   user_id INT UNSIGNED NOT NULL,
   type ENUM('booking', 'donation', 'reminder', 'verification') NOT NULL,
-  reference_code VARCHAR(24) NULL,
+  reference_code VARCHAR(36) NULL,
   status ENUM('sent', 'failed') NOT NULL DEFAULT 'sent',
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
@@ -215,23 +217,33 @@ SELECT 'Food Bank Drive 2026', 'Raise funds for the HK Food Bank. Every pledge c
 FROM categories c, users u WHERE c.name = 'Charity' AND u.email = 'organizer@hkstu.edu'
 AND NOT EXISTS (SELECT 1 FROM events e WHERE e.title = 'Food Bank Drive 2026');
 
-INSERT INTO tickets (user_id, purchased_by, event_id, type, status, reference_code, amount_paid)
-SELECT u.id, u.id, e.id, 'free', 'confirmed', 'TKT9W2R4K7M1', 0.00
+INSERT INTO tickets (user_id, purchased_by, event_id, type, status, ticket_code, amount_paid)
+SELECT u.id, u.id, e.id, 'free', 'confirmed', '11111111-1111-4111-8111-111111111111', 0.00
 FROM users u, events e
 WHERE u.email = 'student@hkstu.edu' AND e.title = 'Campus Innovation Night'
 AND NOT EXISTS (SELECT 1 FROM tickets t WHERE t.user_id = u.id AND t.event_id = e.id);
 
-INSERT INTO tickets (user_id, purchased_by, event_id, type, status, reference_code, amount_paid)
-SELECT u.id, u.id, e.id, 'paid', 'confirmed', 'TKT4H8N2P6Q3X', 20.00
+INSERT INTO tickets (user_id, purchased_by, event_id, type, status, ticket_code, amount_paid)
+SELECT u.id, u.id, e.id, 'paid', 'confirmed', '22222222-2222-4222-8222-222222222222', 20.00
 FROM users u, events e
 WHERE u.email = 'student@hkstu.edu' AND e.title = 'International Food Fair'
 AND NOT EXISTS (SELECT 1 FROM tickets t WHERE t.user_id = u.id AND t.event_id = e.id);
 
-INSERT INTO tickets (user_id, purchased_by, event_id, type, status, reference_code, amount_paid)
-SELECT u.id, u.id, e.id, 'free', 'cancelled', 'TKT7C5V9B1L8Z', 0.00
+INSERT INTO tickets (user_id, purchased_by, event_id, type, status, ticket_code, amount_paid)
+SELECT u.id, u.id, e.id, 'free', 'cancelled', '33333333-3333-4333-8333-333333333333', 0.00
 FROM users u, events e
 WHERE u.email = 'student@hkstu.edu' AND e.title = 'Design Portfolio Workshop'
 AND NOT EXISTS (SELECT 1 FROM tickets t WHERE t.user_id = u.id AND t.event_id = e.id);
+
+-- Derive the stored counter from the seed tickets (confirmed seats only).
+UPDATE events e
+SET e.available_tickets = GREATEST(
+  e.capacity - (
+    SELECT COUNT(*) FROM tickets t
+    WHERE t.event_id = e.id AND t.status = 'confirmed'
+  ),
+  0
+);
 
 INSERT INTO pledges (event_id, user_id, amount, reference_code)
 SELECT e.id, u.id, 100.00, 'PLG5T3Y8U2I6'
@@ -270,10 +282,10 @@ WHERE u.email = 'student@hkstu.edu' AND e.title = 'Campus Innovation Night'
 AND NOT EXISTS (SELECT 1 FROM reviews r WHERE r.event_id = e.id AND r.user_id = u.id);
 
 INSERT INTO email_log (user_id, type, reference_code, status)
-SELECT u.id, 'booking', 'TKT9W2R4K7M1', 'sent'
+SELECT u.id, 'booking', '11111111-1111-4111-8111-111111111111', 'sent'
 FROM users u
 WHERE u.email = 'student@hkstu.edu'
-AND NOT EXISTS (SELECT 1 FROM email_log el WHERE el.reference_code = 'TKT9W2R4K7M1');
+AND NOT EXISTS (SELECT 1 FROM email_log el WHERE el.reference_code = '11111111-1111-4111-8111-111111111111');
 
 INSERT INTO email_log (user_id, type, reference_code, status)
 SELECT u.id, 'donation', 'PLG5T3Y8U2I6', 'sent'
