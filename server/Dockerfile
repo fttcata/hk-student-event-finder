@@ -11,6 +11,8 @@ COPY routes ./routes
 COPY queries ./queries
 COPY middleware ./middleware
 COPY utils ./utils
+COPY scrapers ./scrapers
+COPY scripts ./scripts
 
 ENV NODE_ENV=production
 ENV PORT=5000

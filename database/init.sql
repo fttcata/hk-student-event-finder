@@ -43,9 +43,19 @@ CREATE TABLE IF NOT EXISTS events (
   goal_amount DECIMAL(10,2) NULL,
   status ENUM('draft', 'published', 'cancelled') NOT NULL DEFAULT 'published',
   image_url VARCHAR(500) NULL,
+  -- Scraped events only. source IS NULL means the event was created in this app; anything else
+  -- names the website it came from, and the API treats that event as read-only.
+  source VARCHAR(30) NULL,
+  source_id VARCHAR(64) NULL,
+  source_url VARCHAR(500) NULL,
+  source_organizer VARCHAR(200) NULL,
+  fee_text VARCHAR(150) NULL,
+  end_date DATETIME NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
+  -- Lets each scrape update an event it already stored. Multiple NULLs are allowed, so app events are unaffected.
+  UNIQUE KEY uq_events_source (source, source_id),
   -- RESTRICT: removing a category or an organizer must not silently delete events
   -- (and with them other students' tickets and pledges). Cancel events instead.
   CONSTRAINT fk_events_category
@@ -195,6 +205,11 @@ FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM users WHERE email = 'student@hkstu.edu
 INSERT INTO users (name, email, password_hash, role, student_id, university, is_verified, verification_code, verified_at)
 SELECT 'Pending Student', 'pending@connect.hku.hk', '$2b$10$placeholderhashtokennotarealcredential0000000000000000000000', 'student', 'HK20260002', 'HKU', FALSE, 'VRF7K3M2Q9P4XN8D', NULL
 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM users WHERE email = 'pending@connect.hku.hk');
+
+-- Owns scraped events (events.organizer_id is required). The placeholder hash never matches, so nobody can log in as it.
+INSERT INTO users (name, email, password_hash, role, student_id, university, is_verified, verification_code, verified_at)
+SELECT 'HKU CEDARS', 'cedars-scraper@campushub.local', '$2b$10$placeholderhashtokennotarealcredential0000000000000000000000', 'organizer', NULL, 'HKU', TRUE, NULL, CURRENT_TIMESTAMP
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM users WHERE email = 'cedars-scraper@campushub.local');
 
 -- Seed times are UTC: 18:00, 12:00, 14:00 and 09:00 Hong Kong time; deadlines are 23:59 HKT the day before.
 INSERT INTO events (title, description, category_id, organizer_id, location, address, latitude, longitude, event_date, registration_deadline, event_type, capacity, price, goal_amount, status)

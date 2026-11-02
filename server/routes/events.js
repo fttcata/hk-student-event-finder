@@ -35,6 +35,7 @@ const router = Router()
 const EVENT_TYPES = ['standard', 'fundraiser']
 const AVAILABILITY_FILTERS = ['available', 'sold_out', 'all']
 const PRICE_FILTERS = ['free', 'paid']
+const SOURCE_FILTERS = ['app', 'external']
 const DEFAULT_PAGE = 1
 const DEFAULT_LIMIT = 12
 const MAX_LIMIT = 50
@@ -101,6 +102,14 @@ function serializeEvent(row, viewer) {
     raised_amount: row.raised,
     organizer: serializeOrganizer(row, viewer),
     created_at: row.created_at,
+    // Scraped events are view-only: the client links to source_url instead of booking or donating.
+    // fee_text is the original wording, since "$20 (member) / $30 (non-member)" has no single price.
+    is_external: row.source !== null,
+    source: row.source,
+    source_url: row.source_url,
+    source_organizer: row.source_organizer,
+    fee_text: row.fee_text,
+    end_date: row.end_date,
   }
 }
 
@@ -119,6 +128,11 @@ function parsePositiveInt(value, fallback) {
 // Validates the list query string into filters for listEventRows, or returns { error }.
 function parseEventFilters(query) {
   const filters = {}
+
+  filters.source = query.source ?? 'app'
+  if (!SOURCE_FILTERS.includes(filters.source)) {
+    return { error: "source must be 'app' or 'external'" }
+  }
 
   filters.search = typeof query.search === 'string' ? query.search.trim() : ''
 
@@ -180,6 +194,17 @@ function parseEventId(rawId) {
 }
 
 const EVENT_NOT_FOUND = { error: 'Event not found' }
+
+// Scraped events belong to another website, so every route that changes an event or joins it
+// stops here. Missing ids fall through to the route's own 404.
+async function rejectExternalEvent(request, response, next) {
+  const eventId = parseEventId(request.params.id)
+  const event = eventId === null ? null : await findEventStatus(eventId)
+  if (event?.source) {
+    return response.status(403).json({ error: 'This event is managed on its original website' })
+  }
+  return next()
+}
 
 router.get('/:id', optionalAuth, async (request, response) => {
   const eventId = parseEventId(request.params.id)
@@ -468,7 +493,7 @@ async function findOwnedEvent(connection, rawId, user) {
 
 // Protected, organizer only. Fields left out keep their current value, so the client can send
 // just what changed; the merged event goes through the same validation as POST.
-router.put('/:id', requireAuth, async (request, response) => {
+router.put('/:id', requireAuth, rejectExternalEvent, async (request, response) => {
   let eventId
   const earlyResponse = await withTransaction(async (connection) => {
     const { row, status, error } = await findOwnedEvent(connection, request.params.id, request.user)
@@ -524,7 +549,7 @@ router.put('/:id', requireAuth, async (request, response) => {
 
 // Protected, organizer only. Tickets and pledges are receipts (FK ON DELETE RESTRICT), so the
 // event is cancelled rather than removed: it drops out of GET /api/events but stays readable by id.
-router.delete('/:id', requireAuth, async (request, response) => {
+router.delete('/:id', requireAuth, rejectExternalEvent, async (request, response) => {
   let eventId
   const earlyResponse = await withTransaction(async (connection) => {
     const { row, status, error } = await findOwnedEvent(connection, request.params.id, request.user)
@@ -544,7 +569,7 @@ const MAX_TICKETS_PER_BOOKING = 4
 
 // Protected, verified students only (HANDOFF.md §1). raised_amount is never stored: inserting
 // the pledge row is what raises it, since it is SUM(pledges.amount). Repeat donations are allowed.
-router.post('/:id/donate', requireAuth, async (request, response) => {
+router.post('/:id/donate', requireAuth, rejectExternalEvent, async (request, response) => {
   if (!request.user.is_verified) {
     return response.status(403).json({ error: 'Verify your student email before donating' })
   }
@@ -658,7 +683,7 @@ async function sendBookingEmails({ buyer, event, tickets }) {
 // Protected, verified students only (HANDOFF.md §1). Each attendee gets their own ticket row and
 // code; purchased_by records the buyer. Seats are a stored counter, so the capacity check,
 // decrement, and every insert/update run while the event row is locked.
-router.post('/:id/tickets', requireAuth, async (request, response) => {
+router.post('/:id/tickets', requireAuth, rejectExternalEvent, async (request, response) => {
   if (!request.user.is_verified) {
     return response.status(403).json({ error: 'Verify your student email before booking tickets' })
   }
