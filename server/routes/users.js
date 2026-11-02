@@ -11,7 +11,8 @@ router.get('/me/tickets', requireAuth, async (request, response) => {
 
   const tickets = rows.map((row) => ({
     id: row.id,
-    reference_code: row.reference_code,
+    ticket_code: row.ticket_code,
+    reference_code: row.ticket_code,
     type: row.type,
     status: row.status,
     amount_paid: row.amount_paid,
