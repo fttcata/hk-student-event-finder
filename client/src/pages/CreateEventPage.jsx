@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import Field from '../components/Field.jsx'
 import MapEmbed from '../components/MapEmbed.jsx'
@@ -6,7 +6,7 @@ import { useActivity } from '../context/ActivityContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { toDateTimeInput } from '../utils/format.js'
 import { validateEventForm } from '../utils/validation.js'
-import { createEvent } from '../api/events.js'
+import { createEvent, fetchEvent, updateEvent } from '../api/events.js'
 
 const CATEGORIES = ['Technology', 'Social', 'Career', 'Sports', 'Arts', 'Charity']
 
@@ -38,7 +38,7 @@ function toForm(event) {
   }
 }
 
-function EventForm({ existing }) {
+function EventForm({ existing, persisted = false }) {
   const { saveEvent } = useActivity()
   const navigate = useNavigate()
   const [form, setForm] = useState(() => (existing ? toForm(existing) : EMPTY_FORM))
@@ -87,6 +87,16 @@ function EventForm({ existing }) {
       }
       return
     }
+    if (persisted) {
+      try {
+        const saved = await updateEvent(existing.id, eventData)
+        navigate(`/events/${saved.id}`)
+      } catch (requestError) {
+        setErrors({ form: requestError.message })
+      }
+      return
+    }
+
     const saved = saveEvent({ ...eventData, id: existing.id })
     navigate(`/events/${saved.id}`)
   }
@@ -244,20 +254,56 @@ export default function CreateEventPage() {
   const { user } = useAuth()
   const { createdEvents } = useActivity()
 
-  const existing = id ? createdEvents.find((event) => event.id === id) : null
-  const canEdit = !id || (existing && existing.organizerEmail === user.email)
+  const localExisting = id ? createdEvents.find((event) => event.id === id) : null
+  const [remoteResult, setRemoteResult] = useState(null)
+  const currentRemoteResult = remoteResult?.id === id ? remoteResult : null
+  const remoteExisting = currentRemoteResult?.event ?? null
+  const loadingExisting = Boolean(id && !localExisting && !currentRemoteResult)
+  const loadError = currentRemoteResult?.error?.message ?? ''
+
+  useEffect(() => {
+    if (!id || localExisting) return
+
+    let active = true
+    fetchEvent(id)
+      .then((event) => {
+        if (active) setRemoteResult({ id, event })
+      })
+      .catch((requestError) => {
+        if (active) setRemoteResult({ id, error: requestError })
+      })
+
+    return () => {
+      active = false
+    }
+  }, [id, localExisting])
+
+  const existing = localExisting ?? remoteExisting
+  const persisted = Boolean(remoteExisting)
+  const canEdit =
+    !id ||
+    (existing && (user.role === 'admin' || (existing.organizerEmail && existing.organizerEmail === user.email)))
 
   return (
     <main className="mx-auto max-w-6xl px-4 py-12 sm:px-6">
       <p className="eyebrow">{id ? 'Manage listing' : 'New listing'}</p>
       <h1 className="display mt-4 text-5xl md:text-6xl">{id ? 'Edit event' : 'Create an event'}</h1>
 
-      {canEdit ? (
+      {loadingExisting ? (
+        <p className="mt-10 text-muted">Loading event…</p>
+      ) : loadError ? (
+        <div role="alert" className="panel mt-10">
+          <p>{loadError}</p>
+          <Link to={user.role === 'admin' ? '/admin/events' : '/dashboard?tab=events'} className="btn btn-dark mt-4">
+            Back
+          </Link>
+        </div>
+      ) : canEdit ? (
         // `key` gives the form fresh state when switching between "new" and "edit".
-        <EventForm key={id ?? 'new'} existing={existing} />
+        <EventForm key={id ?? 'new'} existing={existing} persisted={persisted} />
       ) : (
         <div className="panel mt-10">
-          <p>You can only edit events you created.</p>
+          <p>{user.role === 'admin' ? 'This event could not be loaded.' : 'You can only edit events you created.'}</p>
           <Link to="/dashboard?tab=events" className="btn btn-dark mt-4">
             Back to my events
           </Link>

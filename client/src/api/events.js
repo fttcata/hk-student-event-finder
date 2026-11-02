@@ -1,4 +1,4 @@
-import { apiGet, apiPost } from './client.js'
+import { apiDelete, apiGet, apiPost, apiPut } from './client.js'
 import { demoEvents } from '../data/demoEvents.js'
 
 // Accepts the API event shape (GET /api/events and GET /api/events/:id return the
@@ -10,7 +10,16 @@ export function normalizeEvent(raw) {
     description: raw.description ?? '',
     cause: raw.cause ?? raw.pledge ?? raw.description ?? '',
     category: raw.category ?? 'General',
-    type: raw.event_type ?? raw.type ?? 'event',
+    type: raw.event_type === 'standard' ? 'event' : raw.event_type ?? raw.type ?? 'event',
+    isScraped:
+      raw.is_scraped === true ||
+      raw.isScraped === true ||
+      raw.source_type === 'web_scraped' ||
+      raw.sourceType === 'web_scraped' ||
+      raw.event_type === 'web_scraped' ||
+      raw.type === 'web_scraped' ||
+      raw.type === 'scraped',
+    originalUrl: raw.original_url ?? raw.source_url ?? raw.originalUrl ?? raw.sourceUrl ?? '',
     date: raw.date,
     deadline: raw.registration_deadline ?? raw.deadline ?? raw.date,
     location: raw.location,
@@ -26,6 +35,8 @@ export function normalizeEvent(raw) {
     // The API sends organizer as an object; demo data uses a plain name string.
     organizer: raw.organizer?.name ?? raw.organizer ?? 'Student organiser',
     organizerEmail: raw.organizer?.email ?? raw.organizerEmail ?? null,
+    organizerId: raw.organizer?.id ?? raw.organizer_id ?? null,
+    status: raw.status ?? 'published',
   }
 }
 
@@ -61,4 +72,40 @@ export async function fetchMyTickets() {
 
 export async function createEvent(payload) {
   return apiPost('/events', payload)
+}
+
+export async function fetchEvent(id) {
+  const data = await apiGet(`/events/${encodeURIComponent(id)}`)
+  return normalizeEvent(data.event)
+}
+
+export async function fetchManagedEvents(page = 1, limit = 12) {
+  const params = new URLSearchParams({ page: String(page), limit: String(limit) })
+  const data = await apiGet(`/events/manage?${params}`)
+  return {
+    events: data.events.map(normalizeEvent),
+    page: data.page,
+    limit: data.limit,
+    total: data.total,
+  }
+}
+
+export async function updateEvent(id, event) {
+  const data = await apiPut(`/events/${encodeURIComponent(id)}`, {
+    title: event.title,
+    description: event.description,
+    category: event.category,
+    date: event.date,
+    location: event.location,
+    event_type: event.type === 'fundraiser' ? 'fundraiser' : 'standard',
+    total_tickets: event.capacity,
+    price: event.price,
+    fundraiser_goal: event.goal,
+  })
+  return normalizeEvent(data.event)
+}
+
+export async function cancelEvent(id) {
+  const data = await apiDelete(`/events/${encodeURIComponent(id)}`)
+  return normalizeEvent(data.event)
 }

@@ -2,6 +2,7 @@ import { Route, Routes } from 'react-router-dom'
 import Navbar from './components/Navbar.jsx'
 import ProtectedRoute from './components/ProtectedRoute.jsx'
 import CreateEventPage from './pages/CreateEventPage.jsx'
+import AdminEventsPage from './pages/AdminEventsPage.jsx'
 import DashboardPage from './pages/DashboardPage.jsx'
 import EventDetailPage from './pages/EventDetailPage.jsx'
 import EventsPage from './pages/EventsPage.jsx'
@@ -19,6 +20,14 @@ export default function App() {
         <div className="flex-1">
           <Routes>
             <Route path="/" element={<HomePage />} />
+            <Route
+              path="/admin/events"
+              element={
+                <ProtectedRoute role="admin">
+                  <AdminEventsPage />
+                </ProtectedRoute>
+              }
+            />
             <Route path="/events" element={<EventsPage />} />
             <Route path="/events/:id" element={<EventDetailPage />} />
             <Route path="/login" element={<LoginPage />} />

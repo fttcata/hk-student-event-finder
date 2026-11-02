@@ -35,6 +35,11 @@ export default function Navbar() {
           Dashboard
         </NavLink>
       )}
+      {user?.role === 'admin' && (
+        <NavLink to="/admin/events" className={linkClass} onClick={closeMenu}>
+          Admin
+        </NavLink>
+      )}
     </>
   )
 
@@ -45,7 +50,12 @@ export default function Navbar() {
           {user.name.charAt(0).toUpperCase()}
         </span>
         <span>
-          {user.name} <span className="text-muted">· {user.university}</span>
+          {user.name}{' '}
+          {user.role === 'admin' ? (
+            <span className="badge ml-1 bg-ink text-paper">Admin</span>
+          ) : (
+            <span className="text-muted">· {user.university}</span>
+          )}
         </span>
       </span>
       <button type="button" className="btn btn-outline py-2" onClick={handleLogout}>

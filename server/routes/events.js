@@ -2,7 +2,7 @@ import crypto from 'node:crypto'
 import { Router } from 'express'
 import { pool } from '../config/db.js'
 import { sendDonationReceipt, sendTicketReceipt } from '../config/email.js'
-import { optionalAuth, requireAuth } from '../middleware/auth.js'
+import { optionalAuth, requireAdmin, requireAuth } from '../middleware/auth.js'
 
 const router = Router()
 
@@ -207,6 +207,35 @@ function parseEventId(rawId) {
 
 const EVENT_NOT_FOUND = { error: 'Event not found' }
 
+router.get('/manage', requireAdmin, async (request, response) => {
+  const page = parsePositiveInt(request.query.page, DEFAULT_PAGE)
+  if (page === null || page < 1) {
+    return response.status(400).json({ error: 'page must be a positive integer' })
+  }
+  const limit = parsePositiveInt(request.query.limit, DEFAULT_LIMIT)
+  if (limit === null || limit < 1 || limit > MAX_LIMIT) {
+    return response.status(400).json({ error: `limit must be an integer between 1 and ${MAX_LIMIT}` })
+  }
+
+  const [[{ total }]] = await pool.query(
+    `SELECT COUNT(*) AS total FROM events e WHERE e.status <> 'draft'`,
+  )
+  const [rows] = await pool.query(
+    `${EVENT_SELECT}
+     WHERE e.status <> 'draft'
+     ORDER BY e.created_at DESC, e.id DESC
+     LIMIT ? OFFSET ?`,
+    [limit, (page - 1) * limit],
+  )
+
+  return response.json({
+    events: rows.map((row) => serializeEvent(row, request.user)),
+    page,
+    limit,
+    total,
+  })
+})
+
 router.get('/:id', optionalAuth, async (request, response) => {
   const eventId = parseEventId(request.params.id)
   if (eventId === null) return response.status(404).json(EVENT_NOT_FOUND)
@@ -276,7 +305,7 @@ function normalizeEventType(value) {
 
 // Shared by POST and PUT: validates an event payload and returns { error } or { values },
 // where values is keyed by events column name, ready for INSERT ... SET ? / UPDATE ... SET ?.
-async function parseEventInput(body) {
+async function parseEventInput(body, { allowPastDate = false } = {}) {
   const eventType = normalizeEventType(body.event_type ?? body.type)
 
   const title = typeof body.title === 'string' ? body.title.trim() : ''
@@ -313,7 +342,7 @@ async function parseEventInput(body) {
   if (typeof body.date !== 'string' || Number.isNaN(startsAt.getTime())) {
     return { error: 'date must be a valid date' }
   }
-  if (startsAt <= new Date()) {
+  if (!allowPastDate && startsAt <= new Date()) {
     return { error: 'The event must be in the future' }
   }
 
@@ -431,7 +460,7 @@ async function findOwnedEvent(connection, rawId, user) {
     [eventId],
   )
   if (!row) return { status: 404, ...EVENT_NOT_FOUND }
-  if (row.organizer_id !== user.id) {
+  if (row.organizer_id !== user.id && user.role !== 'admin') {
     return { status: 403, error: 'Only the event organizer can change this event' }
   }
   return { row }
@@ -485,7 +514,10 @@ router.put('/:id', requireAuth, async (request, response) => {
       goal: row.goal_amount,
       category: row.category,
     }
-    const { error: inputError, values } = await parseEventInput({ ...current, ...(request.body ?? {}) })
+    const { error: inputError, values } = await parseEventInput(
+      { ...current, ...(request.body ?? {}) },
+      { allowPastDate: row.event_date <= new Date() },
+    )
     if (inputError) return { status: 400, body: { error: inputError } }
 
     // Existing tickets and pledges must stay valid after the edit.
