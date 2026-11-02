@@ -89,3 +89,33 @@ export async function sendTicketReceipt({ user, event, ticket }) {
     ].join('\n'),
   })
 }
+
+// Sent to the buyer when they book seats for other students. Each attendee still gets their own
+// ticket receipt above; this message is the buyer's record of the whole purchase.
+export async function sendBookingSummary({ user, event, tickets }) {
+  if (!transporter) throw new Error('SMTP is not configured')
+
+  const total = tickets.reduce((sum, ticket) => sum + Number(ticket.amount_paid), 0)
+  return transporter.sendMail({
+    from: FROM,
+    to: user.email,
+    subject: `Group booking confirmed — ${event.title}`,
+    text: [
+      `Hi ${user.name},`,
+      '',
+      `You booked ${tickets.length} ticket(s) for "${event.title}".`,
+      '',
+      ...tickets.map(
+        (ticket) =>
+          `${ticket.reference_code} — ${ticket.attendee.name} <${ticket.attendee.email}>`,
+      ),
+      '',
+      `Event date: ${new Date(event.date).toISOString()}`,
+      `Location: ${event.location}`,
+      `Total paid: HK$${total.toFixed(2)}`,
+      '',
+      'Each attendee has received their own ticket email with their code.',
+      '— Campus Hub',
+    ].join('\n'),
+  })
+}

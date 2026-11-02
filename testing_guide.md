@@ -151,8 +151,8 @@ confirmed ticket, re-run `availability=sold_out` (expect 1 row,
 ## 9. Create event tests (`POST /api/events`, protected)
 
 > Creating events requires a verified student (`is_verified = 1`), per HANDOFF.md.
-> Registration creates unverified users, so the tests below flip the flag once to
-> stand in for the (not yet implemented) `POST /api/auth/verify`.
+> Registration creates unverified users; §10 exercises `POST /api/auth/verify`, while this
+> section flips the flag directly to keep the focus on event creation.
 
 ```powershell
 $dir = "$env:TEMP\eventtests"; New-Item -ItemType Directory -Force -Path $dir | Out-Null
@@ -183,7 +183,7 @@ Post '/events' std.json $null 401 'no token'
 Post '/events' std.json 'garbage.token' 401 'garbage token'
 Post '/events' std.json $token 403 'unverified user'
 
-# stand in for POST /api/auth/verify (the middleware re-reads the user each request)
+# flip directly; POST /api/auth/verify is exercised in §10
 docker compose exec mysql mysql -uroot -proot_password student_events -e "UPDATE users SET is_verified=1 WHERE email='eventtest@connect.hku.hk';"
 
 # 201 — created event comes back with the spec field names
@@ -211,15 +211,19 @@ Expected: `401`/`401`/`403`, three `201`s, two `400`s, and DB rows where
 `registration_deadline` = `event_date` − 24h, `organizer_id` matches
 the token user, fundraiser rows have `goal_amount` set and `capacity = 0`.
 
-## 10. Ticket booking tests (`POST /api/events/:id/tickets`, protected)
+## 10. Group ticket booking tests (`POST /api/events/:id/tickets`, protected)
 
-> Booking requires a verified student (`is_verified = 1`), a published standard event, and open
-> registration. Seats are capacity minus confirmed tickets (`capacity = 0` means unlimited,
-> see HANDOFF.md §1). Verification is flipped in SQL as a stand-in for the not-yet-implemented
-> `POST /api/auth/verify`. A cancelled ticket row is re-confirmed on rebooking (never a second INSERT).
+> Every attendee must be a registered, verified student. The signed-in buyer may include
+> themselves or book seats only for other students: `user_id` is the holder and `purchased_by`
+> is the buyer. Send up to four attendee emails (`{ "attendees": [...] }`). `quantity` alone
+> still works for one self-booked seat, but `quantity > 1` without `attendees` is a 400.
+> Seats remain capacity minus confirmed tickets (`capacity = 0` means unlimited). The
+> `UNIQUE(user_id, event_id)` rule still allows one seat per holder, so a cancelled ticket is
+> re-confirmed with an UPDATE, never a second INSERT. The client checkout currently sends only
+> `quantity`; buying more than one seat from the UI needs the attendee-email inputs.
 
 ```powershell
-$dir = "$env:TEMP\tickettests"; New-Item -ItemType Directory -Force -Path $dir | Out-Null
+$dir = "$env:TEMP\grouptickettests"; New-Item -ItemType Directory -Force -Path $dir | Out-Null
 $api = 'http://localhost:5000/api'
 function Body($file, $json) { Set-Content -LiteralPath "$dir\$file" -Value $json -Encoding ASCII -NoNewline }
 function Call($method, $path, $file, $auth) {
@@ -227,77 +231,124 @@ function Call($method, $path, $file, $auth) {
   if ($file) { $headers += @('-H', 'Content-Type: application/json', '--data-binary', "@$dir\$file") }
   if ($auth) { $headers += @('-H', "Authorization: Bearer $auth") }
   $code = curl.exe -s -o "$dir\out.json" -w "%{http_code}" -X $method "$api$path" @headers
-  @{ code = $code; body = Get-Content "$dir\out.json" -Raw }
+  @{ code = "$code"; body = Get-Content "$dir\out.json" -Raw }
+}
+function Sql($query) { (docker compose exec -T mysql mysql -uroot -proot_password student_events -N -e $query) -join "`n" }
+function Check($result, $expect, $label) {
+  $mark = if ($result.code -eq "$expect") { 'PASS' } else { "FAIL (expected $expect)" }
+  "[$mark] $label -> $($result.code)  $($result.body)"
+  $result
 }
 function Register($name, $email) {
-  Body reg.json "{`"name`":`"$name`",`"email`":`"$email`",`"password`":`"password123`"}"
-  Call 'POST' '/auth/register' 'reg.json' $null | Out-Null
-  Body login.json "{`"email`":`"$email`",`"password`":`"password123`"}"
-  (Call 'POST' '/auth/login' 'login.json' $null).body | ConvertFrom-Json
+  Body 'reg.json' (@{ name = $name; email = $email; password = 'password123' } | ConvertTo-Json -Compress)
+  ((Call 'POST' '/auth/register' 'reg.json' $null).body | ConvertFrom-Json)
 }
-function Book($eventId, $auth, $expect, $label) {
-  $result = Call 'POST' "/events/$eventId/tickets" $null $auth
-  $mark = if ($result.code -eq $expect) { 'PASS' } else { "FAIL (expected $expect)" }
-  "[$mark] $label -> $($result.code)  $($result.body)"
-  $result.body
+function Verify($email) {
+  $code = (Sql "SELECT verification_code FROM users WHERE email='$email'").Trim()
+  Body 'verify.json' (@{ email = $email; code = $code } | ConvertTo-Json -Compress)
+  (Call 'POST' '/auth/verify' 'verify.json' $null).code   # 200
+}
+function CreateEvent($title, $capacity, $price, $date) {
+  Body 'event.json' (@{
+    event_type = 'standard'; title = $title; description = 'Event used for group ticket booking tests.'
+    category = 'Technology'; date = $date; location = 'Test Hall'; capacity = $capacity; price = $price
+  } | ConvertTo-Json -Compress)
+  ((Call 'POST' '/events' 'event.json' $org.token).body | ConvertFrom-Json).event.id
+}
+function Book($eventId, $auth, $payload, $expect, $label) {
+  Body 'book.json' $payload
+  Check (Call 'POST' "/events/$eventId/tickets" 'book.json' $auth) $expect $label
+}
+function Attendees($emails, $quantity) {
+  $payload = @{ attendees = @($emails) }
+  if ($null -ne $quantity) { $payload.quantity = $quantity }
+  $payload | ConvertTo-Json -Compress
 }
 
-# 4 users: the organizer creates events, two bookers race for the last seat, one stays unverified.
-$org = Register 'Ticket Organizer' 'org.tickets@connect.hku.hk'
-$book1 = Register 'Ticket Booker One' 'ticket1@connect.hku.hk'
-$book2 = Register 'Ticket Booker Two' 'ticket2@connect.hku.hk'
-$unverified = Register 'Ticket Unverified' 'unverified.tickets@connect.hku.hk'
-docker compose exec mysql mysql -uroot -proot_password student_events -e "UPDATE users SET is_verified=1 WHERE email IN ('org.tickets@connect.hku.hk','ticket1@connect.hku.hk','ticket2@connect.hku.hk');"
+# Six users: five verified (organizer, buyer, two friends, other buyer), one unverified.
+$org = Register 'Guide Organizer' 'org.group@connect.hku.hk'
+$buyer = Register 'Guide Buyer' 'buyer.group@connect.hku.hk'
+$f1 = Register 'Guide Friend One' 'friend1.group@connect.hku.hk'
+$f2 = Register 'Guide Friend Two' 'friend2.group@connect.hku.hk'
+$other = Register 'Guide Other Buyer' 'other.group@connect.hku.hk'
+$unverified = Register 'Guide Unverified' 'unverified.group@connect.hku.hk'
+foreach ($u in @($org, $buyer, $f1, $f2, $other)) { if ((Verify $u.user.email) -ne '200') { throw "verify failed for $($u.user.email)" } }
 
-function CreateEvent($file, $json) {
-  Body $file $json
-  ((Call 'POST' '/events' $file $org.token).body | ConvertFrom-Json).event.id
-}
-$free = CreateEvent 'e-free.json' '{"event_type":"standard","title":"Ticket Test Free","description":"Event used for ticket booking tests in the guide.","category":"Technology","date":"2026-12-15T18:00:00Z","location":"Test Hall","capacity":2,"price":0}'
-$race = CreateEvent 'e-race.json' '{"event_type":"standard","title":"Ticket Test Race","description":"Last-seat race test event for concurrent bookings.","category":"Technology","date":"2026-12-16T18:00:00Z","location":"Test Hall","capacity":1,"price":0}'
-$paid = CreateEvent 'e-paid.json' '{"event_type":"standard","title":"Ticket Test Paid","description":"Paid ticket test event with a twenty dollar price.","category":"Social","date":"2026-12-17T18:00:00Z","location":"Test Hall","capacity":3,"price":20}'
-$closed = CreateEvent 'e-closed.json' '{"event_type":"standard","title":"Ticket Test Closed","description":"Deadline is forced into the past by the test script.","category":"Career","date":"2026-12-18T18:00:00Z","location":"Test Hall","capacity":5,"price":0}'
-$cancelled = CreateEvent 'e-cancelled.json' '{"event_type":"standard","title":"Ticket Test Cancelled","description":"Cancelled by its organizer before anyone books a seat.","category":"Sports","date":"2026-12-19T18:00:00Z","location":"Test Hall","capacity":5,"price":0}'
-docker compose exec mysql mysql -uroot -proot_password student_events -e "UPDATE events SET registration_deadline=UTC_TIMESTAMP() - INTERVAL 1 HOUR WHERE id=$closed;"
+$free = CreateEvent 'Guide Group Free' 5 0 '2026-12-15T18:00:00Z'
+$paid = CreateEvent 'Guide Group Paid' 3 20 '2026-12-16T18:00:00Z'
+$tiny = CreateEvent 'Guide Group Tiny' 2 0 '2026-12-17T18:00:00Z'
+$race = CreateEvent 'Guide Group Race' 1 0 '2026-12-18T18:00:00Z'
+$closed = CreateEvent 'Guide Group Closed' 5 0 '2026-12-19T18:00:00Z'
+$cancelled = CreateEvent 'Guide Group Cancelled' 5 0 '2026-12-20T18:00:00Z'
+Sql "UPDATE events SET registration_deadline=UTC_TIMESTAMP() - INTERVAL 1 HOUR WHERE id=$closed" | Out-Null
 Call 'DELETE' "/events/$cancelled" $null $org.token | Out-Null
-$fundraiser = (docker compose exec mysql mysql -uroot -proot_password student_events -N -e "SELECT id FROM events WHERE event_type='fundraiser' LIMIT 1;" | Select-Object -First 1).Trim()
+$fundraiser = (Sql "SELECT id FROM events WHERE event_type='fundraiser' LIMIT 1").Trim()
 
-# 401 / 403 gates
-Book $free $null 401 'no token'
-Book $free $unverified.token 403 'unverified user'
+# Gates
+Book $free $null '{}' 401 'no token'
+Book $free $unverified.token '{}' 403 'unverified buyer'
+Book $fundraiser $buyer.token '{}' 400 'fundraiser uses donations'
+Book $closed $buyer.token '{}' 409 'registration closed'
+Book $cancelled $buyer.token '{}' 409 'cancelled event'
+Book 'abc' $buyer.token '{}' 404 'non-numeric id'
+Book '999999' $buyer.token '{}' 404 'missing event'
 
-# 201 — response carries ticket_code plus the decremented available_tickets
-Book $free $book1.token 201 'book free seat'          # type free, amount_paid 0, available 1
-Book $free $book1.token 409 'duplicate booking'
-Book $paid $book2.token 201 'book paid seat'          # type paid, amount_paid 20
-Book $fundraiser $book1.token 400 'fundraiser uses donations, not tickets'
-Book $closed $book1.token 409 'registration deadline passed'
-Book $cancelled $book1.token 409 'cancelled event'
-Book 'abc' $book1.token 404 'non-numeric id'
-Book '999999' $book1.token 404 'missing event'
+# Single ticket for self (backward-compatible quantity path)
+Book $free $buyer.token '{"quantity":1}' 201 'buyer books one seat for self'   # available 4
+Book $free $buyer.token '{"quantity":1}' 409 'buyer already holds a seat'
 
-# last-seat race: capacity 1, two users in parallel → one 201, one 409
-$race1 = Start-Job -ScriptBlock { param($id, $tok, $d) curl.exe -s -o "$d\race1.json" -w "%{http_code}" -X POST "http://localhost:5000/api/events/$id/tickets" -H "Authorization: Bearer $tok" } -ArgumentList $race, $book1.token, $dir
-$race2 = Start-Job -ScriptBlock { param($id, $tok, $d) curl.exe -s -o "$d\race2.json" -w "%{http_code}" -X POST "http://localhost:5000/api/events/$id/tickets" -H "Authorization: Bearer $tok" } -ArgumentList $race, $book2.token, $dir
+# Validation
+Book $free $buyer.token (Attendees @($f1.user.email, $f1.user.email)) 400 'duplicate attendee email'
+Book $free $buyer.token (Attendees @('nobody@connect.hku.hk')) 400 'unknown attendee email'
+Book $free $buyer.token (Attendees @($unverified.user.email)) 403 'unverified attendee'
+Book $free $buyer.token '{"quantity":3}' 400 'quantity > 1 without attendees'
+Book $free $buyer.token (Attendees @($f1.user.email, $f2.user.email) 3) 400 'quantity/attendee mismatch'
+Book $free $buyer.token (Attendees @($f1.user.email, $f2.user.email, $other.user.email, $buyer.user.email, $org.user.email)) 400 'more than four attendees'
+
+# Buyer books for two friends (buyer is not in the attendee list)
+Book $free $other.token (Attendees @($f1.user.email, $f2.user.email)) 201 'other buys two seats for friends'
+
+# Buyer books three seats including themselves on a paid event
+Book $paid $buyer.token (Attendees @($buyer.user.email, $f1.user.email, $f2.user.email)) 201 'paid group of three'
+Book $paid $other.token (Attendees @($f1.user.email)) 409 'f1 already holds paid ticket'
+
+# Capacity is checked against the whole group, then a fitting group succeeds
+Book $tiny $buyer.token (Attendees @($buyer.user.email, $f1.user.email, $f2.user.email)) 409 'three seats for capacity two'
+Book $tiny $buyer.token (Attendees @($buyer.user.email, $f1.user.email)) 201 'two seats for capacity two'
+
+# Last-seat race: capacity 1, two buyers in parallel -> one 201, one 409
+Body 'race.json' '{}'
+$race1 = Start-Job -ScriptBlock { param($id, $tok, $f, $o) curl.exe -s -o $o -w "%{http_code}" -X POST "http://localhost:5000/api/events/$id/tickets" -H "Content-Type: application/json" --data-binary "@$f" -H "Authorization: Bearer $tok" } -ArgumentList $race, $buyer.token, "$dir\race.json", "$dir\raceA.json"
+$race2 = Start-Job -ScriptBlock { param($id, $tok, $f, $o) curl.exe -s -o $o -w "%{http_code}" -X POST "http://localhost:5000/api/events/$id/tickets" -H "Content-Type: application/json" --data-binary "@$f" -H "Authorization: Bearer $tok" } -ArgumentList $race, $other.token, "$dir\race.json", "$dir\raceB.json"
 Wait-Job $race1, $race2 | Out-Null
-"race -> $(Receive-Job $race1) / $(Receive-Job $race2)"   # one 201 and one 409
+"race -> $(Receive-Job $race1) / $(Receive-Job $race2)   # one 201 and one 409"
 
-# rebooking confirms the same cancelled row (UNIQUE user+event), never a second INSERT
-docker compose exec mysql mysql -uroot -proot_password student_events -e "UPDATE tickets SET status='cancelled' WHERE user_id=$($book1.user.id) AND event_id=$free;"
-Book $free $book1.token 201 'rebook after cancel'
+# Cancel f1's paid ticket, then have another buyer rebook it
+$oldRow = (Sql "SELECT id FROM tickets WHERE user_id=$($f1.user.id) AND event_id=$paid").Trim()
+Sql "UPDATE tickets SET status='cancelled' WHERE id=$oldRow" | Out-Null
+Book $paid $other.token (Attendees @($f1.user.email)) 201 'other rebooks cancelled f1 seat'
+$newRow = (Sql "SELECT id FROM tickets WHERE user_id=$($f1.user.id) AND event_id=$paid").Trim()
+"rebook row -> old $oldRow / new $newRow   # same id; purchased_by is now other"
 
-# DB checks: one confirmed race row, ticket/code columns, email_log booking entries
-docker compose exec mysql mysql -uroot -proot_password student_events -e "SELECT id,user_id,event_id,type,status,reference_code,amount_paid FROM tickets WHERE event_id IN ($free,$race,$paid); SELECT COUNT(*) AS confirmed_race_seats FROM tickets WHERE event_id=$race AND status='confirmed'; SELECT type,status,reference_code FROM email_log WHERE reference_code LIKE 'TKT%' ORDER BY id DESC LIMIT 5;"
+# DB checks: holder vs buyer, paid amounts, one race seat, email_log per ticket
+Sql "SELECT id,user_id,purchased_by,event_id,status,reference_code,amount_paid FROM tickets WHERE event_id IN ($free,$paid,$tiny,$race) ORDER BY id"
+Sql "SELECT COUNT(*) AS confirmed_race_seats FROM tickets WHERE event_id=$race AND status='confirmed'"
+Sql "SELECT COUNT(*) AS booking_emails FROM email_log WHERE reference_code LIKE 'TKT%'"
 
-# cleanup: tickets first (FK RESTRICT), then events, then users
-docker compose exec mysql mysql -uroot -proot_password student_events -e "DELETE FROM tickets WHERE event_id IN ($free,$race,$paid); DELETE FROM events WHERE organizer_id=$($org.user.id); DELETE FROM users WHERE email IN ('org.tickets@connect.hku.hk','ticket1@connect.hku.hk','ticket2@connect.hku.hk','unverified.tickets@connect.hku.hk');"
+# Cleanup: tickets first (FK RESTRICT), then events, then users
+Sql "DELETE FROM tickets WHERE event_id IN ($free,$paid,$tiny,$race)" | Out-Null
+Sql "DELETE FROM events WHERE organizer_id=$($org.user.id)" | Out-Null
+Sql "DELETE FROM users WHERE email IN ('org.group@connect.hku.hk','buyer.group@connect.hku.hk','friend1.group@connect.hku.hk','friend2.group@connect.hku.hk','other.group@connect.hku.hk','unverified.group@connect.hku.hk')" | Out-Null
 ```
 
-Expected: `401`/`403`, `201` for free/paid/rebook, `400` for the fundraiser, `409` for
-duplicate/deadline/cancelled, `404` for bad or missing ids, exactly **one** confirmed race row,
-and `ticket_code` matching `TKT` + 9 uppercase alphanumerics. Receipt emails depend on SMTP:
-without `server/.env` credentials `receipt_email_sent` is `false` and `email_log` records
-`failed`; with Mailtrap credentials it is `true`/`sent`.
+Expected: `401`/`403` gates, `201` for the single free seat, two friend seats, paid group,
+tiny group, and rebook; `400` for unknown/unverified/duplicate attendees and quantity misuse;
+`409` for duplicate holder, capacity overflow, closed/cancelled events; `404` for bad ids.
+The three paid tickets total HK$60 with `available_tickets = 0`; the free event ends with
+`available_tickets = 2`; exactly one race seat is confirmed; rebooking reuses the same row id
+and changes `purchased_by`. Receipt emails depend on SMTP: without `server/.env` credentials
+`receipt_email_sent` is `false`, every ticket still gets an `email_log` `booking` row marked
+`failed`, and with Mailtrap credentials those rows become `sent`.
 
 ## 11. Teardown
 

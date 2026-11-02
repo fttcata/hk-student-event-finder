@@ -7,6 +7,7 @@ erDiagram
     users ||--o{ events : "organizes"
     categories ||--o{ events : "categorizes"
     users ||--o{ tickets : "holds"
+    users ||--o{ tickets : "purchases"
     events ||--o{ tickets : "issued for"
     users ||--o{ pledges : "donates"
     events ||--o{ pledges : "fundraiser for"
@@ -62,6 +63,7 @@ erDiagram
     tickets {
         int id PK
         int user_id FK
+        int purchased_by FK
         int event_id FK
         enum type "free|paid"
         enum status "confirmed|cancelled"
@@ -125,8 +127,10 @@ erDiagram
 
 - 9 tables total: `users`, `categories`, `events`, `tickets`, `pledges`, `chat_messages`, `reviews`, `email_log`, `bookmarks`
 - All FKs use `ON UPDATE CASCADE`. `ON DELETE` is `RESTRICT` for `events.category_id`, `events.organizer_id`
-  and both FKs of `tickets` and `pledges` (receipts must not disappear with a category, user or event —
-  cancel events via `status` instead); every other FK uses `ON DELETE CASCADE`
+  and all three FKs of `tickets` and both FKs of `pledges` (receipts must not disappear with a category,
+  user or event — cancel events via `status` instead); every other FK uses `ON DELETE CASCADE`
+- `tickets.user_id` is the attendee/holder; `tickets.purchased_by` is the student who paid, so one buyer
+  can book seats for several registered students. `UNIQUE(user_id, event_id)` still applies per holder.
 - All `DATETIME`/`TIMESTAMP` values are UTC (`event_date` is the start instant, not just a day)
 - Fundraiser progress is computed live: `SELECT COALESCE(SUM(amount),0) FROM pledges WHERE event_id = ?`
 - `pledges` has no `UNIQUE(user_id, event_id)` — repeat donations are allowed by design

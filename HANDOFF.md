@@ -13,7 +13,7 @@
 | Decision | Rule | Why |
 |---|---|---|
 | Seat ownership | A seat exists only while `tickets.status = 'confirmed'`. `cancelled` releases the seat but keeps the receipt row. | Proposal: capacity enforcement + receipt lookups after cancellation |
-| Ticket uniqueness | `UNIQUE(user_id, event_id)` — one ticket row per user per event. Rebooking = **UPDATE** the row (`cancelled → confirmed`), never a second INSERT. | Verified: round-trip update works; a second INSERT fails with 1062 |
+| Ticket uniqueness | `UNIQUE(user_id, event_id)` — one ticket row per holder per event. A buyer may book seats for several registered, verified students; each row keeps the holder's `user_id` and records the buyer in `purchased_by`. Rebooking = **UPDATE** the row (`cancelled → confirmed`), never a second INSERT. | Verified: round-trip update works; a second INSERT fails with 1062 |
 | Receipts | `reference_code` is UNIQUE in both `tickets` and `pledges`. Generate server-side (e.g. `TKT`/`PLG` + random), return in every booking/donation response. | Proposal: receipts with unique verification code |
 | Repeat donations | `pledges` has **no** unique on `(user_id, event_id)` — students may pledge many times. Don't add one. | Team decision (Option B): repeat giving is realistic for fundraisers |
 | Fundraiser progress | Always compute live: `SELECT COALESCE(SUM(amount),0) FROM pledges WHERE event_id = ?`. Never store a running total. | No stale counters; verified SUM = 350 on seed data |
@@ -40,22 +40,24 @@ try {
     [eventId],
   )
 
-  // 2. Count confirmed seats (locks held until COMMIT)
+  // 2. Count confirmed seats (locks held until COMMIT). For a group booking, check
+  //    booked + requested seats, not just one seat.
   const [[{ n }]] = await conn.query(
     "SELECT COUNT(*) AS n FROM tickets WHERE event_id = ? AND status = 'confirmed'",
     [eventId],
   )
-  if (event.capacity > 0 && n >= event.capacity) {
+  if (event.capacity > 0 && n + attendees.length > event.capacity) {
     await conn.rollback()
     return response.status(409).json({ error: 'Event is full' })
   }
 
-  // 3. Insert with fresh reference code (unique violation -> retry/409)
+  // 3. Insert one row per attendee with a fresh reference code (unique violation -> retry/409).
+  //    user_id is the attendee; purchased_by is the signed-in buyer.
   const code = 'TKT' + crypto.randomBytes(6).toString('hex').toUpperCase()
   await conn.query(
-    `INSERT INTO tickets (user_id, event_id, type, status, reference_code, amount_paid)
-     VALUES (?, ?, ?, 'confirmed', ?, ?)`,
-    [userId, eventId, event.price > 0 ? 'paid' : 'free', code, event.price],
+    `INSERT INTO tickets (user_id, purchased_by, event_id, type, status, reference_code, amount_paid)
+     VALUES (?, ?, ?, ?, 'confirmed', ?, ?)`,
+    [attendeeId, buyerId, eventId, event.price > 0 ? 'paid' : 'free', code, event.price],
   )
 
   await conn.commit()
@@ -109,7 +111,7 @@ Also require: authenticated user + `tickets.status = 'confirmed'` for that event
 | `GET /api/events` | `events` + `categories` | exists ✅ (add filters: type, free/paid, keyword, lat/lng bounds) |
 | `POST /api/events` | `events` | allow `event_type`, lat/lng, deadline; fundraiser requires `goal_amount` (400 if missing, else 500 from CHECK) |
 | `PUT /api/events/:id` | `events` | organizer only; same fundraiser rule on UPDATE |
-| `POST /api/events/:id/book` | `tickets` | **transaction pattern §2** → 201 + reference code; 409 when full; 401/403 if unverified |
+| `POST /api/events/:id/tickets` | `tickets` | **transaction pattern §2**; body `{ attendees: [student emails] }` (1–4) → 201 + one code per attendee; 409 when full/already held; 401/403 if unverified |
 | `DELETE /api/events/:id/ticket` | `tickets` | set `status='cancelled'` (do not DELETE) |
 | `POST /api/events/:id/pledge` | `pledges` | repeated allowed; 201 + reference code; `amount > 0` → 400 |
 | `GET /api/events/:id/progress` | `pledges` | `SUM(amount)` vs `goal_amount` |
