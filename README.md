@@ -60,3 +60,15 @@ The database credentials in `server/.env.example` match `docker-compose.yml` for
 Email receipts: set `SMTP_USER` / `SMTP_PASSWORD` in `server/.env` to your Mailtrap sandbox credentials
 (Mailtrap → Sandboxes → SMTP). The Docker server reads its `SMTP_*` settings from that file too, so run
 `docker compose up -d server` after changing it. On startup the server logs `SMTP ready` or why SMTP failed.
+
+Ticket checkout collects a name and email address for each attendee. Each ticket is stored with its
+attendee details and its own reference code, and confirmation is sent to that attendee when SMTP is
+configured. After updating an existing MySQL volume, run this migration once from the repository root:
+
+```sh
+DB_HOST=127.0.0.1 DB_PORT=3307 DB_NAME=student_events DB_USER=app_user DB_PASSWORD=app_password \
+  npm run db:migrate-ticket-attendees --prefix server
+```
+
+The migration backfills existing tickets from their purchaser accounts and can be safely rerun.
+Fresh databases get the attendee fields from `database/init.sql`.

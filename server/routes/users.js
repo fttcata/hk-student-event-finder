@@ -8,7 +8,8 @@ const router = Router()
 // (they are receipts, HANDOFF.md §1) and carry status 'cancelled'.
 router.get('/me/tickets', requireAuth, async (request, response) => {
   const [rows] = await pool.query(
-    `SELECT t.id, t.reference_code, t.type, t.status, t.amount_paid, t.created_at,
+    `SELECT t.id, t.reference_code, t.attendee_name, t.attendee_email,
+            t.type, t.status, t.amount_paid, t.created_at,
             e.id AS event_id, e.title, e.event_date, e.location, e.address, e.image_url,
             e.event_type, e.status AS event_status, e.price, c.name AS category
      FROM tickets t
@@ -25,6 +26,8 @@ router.get('/me/tickets', requireAuth, async (request, response) => {
     type: row.type,
     status: row.status,
     amount_paid: row.amount_paid,
+    attendee_name: row.attendee_name,
+    attendee_email: row.attendee_email,
     booked_at: row.created_at,
     event: {
       id: row.event_id,

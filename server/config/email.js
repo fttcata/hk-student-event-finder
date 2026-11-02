@@ -70,7 +70,7 @@ export async function sendTicketReceipt({ user, event, ticket }) {
   const amount = `HK$${Number(ticket.amount_paid).toFixed(2)}`
   return transporter.sendMail({
     from: FROM,
-    to: user.email,
+    to: ticket.attendee_email ?? user.email,
     subject: `Ticket confirmed ${ticket.reference_code} — ${event.title}`,
     html: generateTicketEmailHTML(user.name, event.title, ticket.reference_code, ticket.amount_paid, new Date(event.date).toISOString()),
     text: [

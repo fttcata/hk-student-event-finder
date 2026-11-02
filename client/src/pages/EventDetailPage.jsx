@@ -5,7 +5,6 @@ import ProgressBar from '../components/ProgressBar.jsx'
 import Receipt from '../components/Receipt.jsx'
 import CountdownTimer from '../components/CountdownTimer.jsx'
 import TicketCounter from '../components/TicketCounter.jsx'
-import TicketCheckoutModal from '../components/TicketCheckoutModal.jsx'
 import EventChatRoom from '../components/EventChatRoom.jsx'
 import FundraiserDonateModal from '../components/FundraiserDonateModal.jsx'
 import { cancelEvent, fetchEvent } from '../api/events.js'
@@ -44,16 +43,12 @@ function Deadline({ deadline, now }) {
   )
 }
 
-// Free ticket claim, or paid ticket with a mock checkout step.
+// Select quantity here, then collect attendee details on the dedicated checkout page.
 function TicketPanel({ event }) {
   const { user } = useAuth()
-  const { bookTicket } = useActivity()
   const now = useNow()
+  const navigate = useNavigate()
   const [quantity, setQuantity] = useState(1)
-  const [step, setStep] = useState('select') // select → checkout (paid only) → done
-  const [receipt, setReceipt] = useState(null)
-  const [error, setError] = useState('')
-  const [checkoutOpen, setCheckoutOpen] = useState(false)
 
   const hasLimit = event.capacity > 0
   const seatsLeft = hasLimit ? event.capacity - event.booked : Infinity
@@ -61,31 +56,6 @@ function TicketPanel({ event }) {
   const isClosed = new Date(event.deadline) <= now
   const isPaid = event.price > 0
   const total = event.price * quantity
-
-  function confirmBooking() {
-    try {
-      setReceipt(bookTicket(event, quantity))
-      setStep('done')
-    } catch (err) {
-      setError(err.message)
-    }
-  }
-
-  if (step === 'done') {
-    return (
-      <Receipt
-        heading="Confirmation email sent!"
-        reference={receipt.reference}
-        email={user.email}
-        rows={[
-          ['Event', event.title],
-          ['When', formatDateTime(event.date)],
-          ['Tickets', receipt.quantity],
-          ['Total', isPaid ? formatMoney(receipt.total) : 'Free'],
-        ]}
-      />
-    )
-  }
 
   return (
     <div className="panel space-y-5">
@@ -110,28 +80,7 @@ function TicketPanel({ event }) {
       <Deadline deadline={event.deadline} now={now} />
       <CountdownTimer target={event.deadline} />
 
-      {step === 'checkout' ? (
-        <div className="space-y-4 border-t border-line pt-5">
-          <p className="eyebrow">Mock checkout</p>
-          <div className="flex justify-between text-sm">
-            <span>
-              {quantity} × {formatMoney(event.price)}
-            </span>
-            <span className="font-semibold">{formatMoney(total)}</span>
-          </div>
-          <p className="rounded-sm bg-peach/50 p-3 text-xs text-muted">
-            Demo payment: no card details are collected. Stripe is planned as a nice-to-have.
-          </p>
-          <div className="flex gap-2">
-            <button type="button" className="btn btn-outline flex-1" onClick={() => setStep('select')}>
-              Back
-            </button>
-            <button type="button" className="btn btn-accent flex-1" onClick={confirmBooking}>
-              Pay {formatMoney(total)}
-            </button>
-          </div>
-        </div>
-      ) : isFull || isClosed ? (
+      {isFull || isClosed ? (
         <button type="button" className="btn btn-dark w-full" disabled>
           {isFull ? 'Sold out' : 'Registration closed'}
         </button>
@@ -146,14 +95,12 @@ function TicketPanel({ event }) {
           <button
             type="button"
             className="btn btn-dark w-full"
-            onClick={() => setCheckoutOpen(true)}
+            onClick={() => navigate(`/events/${event.id}/checkout?quantity=${quantity}`)}
           >
-            {isPaid ? `Checkout · ${formatMoney(total)}` : 'Claim free ticket'}
+            {isPaid ? `Continue · ${formatMoney(total)}` : 'Continue to free ticket checkout'}
           </button>
         </div>
       )}
-      {error && <p className="text-sm text-accent">{error}</p>}
-      {checkoutOpen && <TicketCheckoutModal event={event} quantity={quantity} onClose={() => setCheckoutOpen(false)} onSuccess={(result) => { setCheckoutOpen(false); setReceipt({ reference: result.ticket.reference_code, quantity, total: Number(result.ticket.amount_paid) * quantity }); setStep('done') }} />}
     </div>
   )
 }

@@ -66,13 +66,14 @@ CREATE TABLE IF NOT EXISTS tickets (
   id INT UNSIGNED NOT NULL AUTO_INCREMENT,
   user_id INT UNSIGNED NOT NULL,
   event_id INT UNSIGNED NOT NULL,
+  attendee_name VARCHAR(120) NOT NULL,
+  attendee_email VARCHAR(160) NOT NULL,
   type ENUM('free', 'paid') NOT NULL DEFAULT 'free',
   status ENUM('confirmed', 'cancelled') NOT NULL DEFAULT 'confirmed',
   reference_code VARCHAR(24) NOT NULL,
   amount_paid DECIMAL(8,2) NOT NULL DEFAULT 0.00,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
-  UNIQUE KEY uq_tickets_user_event (user_id, event_id),
   UNIQUE KEY uq_tickets_reference (reference_code),
   -- RESTRICT: tickets are receipts; they must outlive neither their event nor their holder by accident.
   CONSTRAINT fk_tickets_user
@@ -81,6 +82,7 @@ CREATE TABLE IF NOT EXISTS tickets (
   CONSTRAINT fk_tickets_event
     FOREIGN KEY (event_id) REFERENCES events (id)
     ON DELETE RESTRICT ON UPDATE CASCADE,
+  INDEX idx_tickets_user (user_id),
   INDEX idx_tickets_event (event_id)
 ) ENGINE=InnoDB;
 
@@ -209,20 +211,20 @@ SELECT 'Food Bank Drive 2026', 'Raise funds for the HK Food Bank. Every pledge c
 FROM categories c, users u WHERE c.name = 'Charity' AND u.email = 'organizer@hkstu.edu'
 AND NOT EXISTS (SELECT 1 FROM events e WHERE e.title = 'Food Bank Drive 2026');
 
-INSERT INTO tickets (user_id, event_id, type, status, reference_code, amount_paid)
-SELECT u.id, e.id, 'free', 'confirmed', 'TKT9W2R4K7M1', 0.00
+INSERT INTO tickets (user_id, event_id, attendee_name, attendee_email, type, status, reference_code, amount_paid)
+SELECT u.id, e.id, u.name, u.email, 'free', 'confirmed', 'TKT9W2R4K7M1', 0.00
 FROM users u, events e
 WHERE u.email = 'student@hkstu.edu' AND e.title = 'Campus Innovation Night'
 AND NOT EXISTS (SELECT 1 FROM tickets t WHERE t.user_id = u.id AND t.event_id = e.id);
 
-INSERT INTO tickets (user_id, event_id, type, status, reference_code, amount_paid)
-SELECT u.id, e.id, 'paid', 'confirmed', 'TKT4H8N2P6Q3X', 20.00
+INSERT INTO tickets (user_id, event_id, attendee_name, attendee_email, type, status, reference_code, amount_paid)
+SELECT u.id, e.id, u.name, u.email, 'paid', 'confirmed', 'TKT4H8N2P6Q3X', 20.00
 FROM users u, events e
 WHERE u.email = 'student@hkstu.edu' AND e.title = 'International Food Fair'
 AND NOT EXISTS (SELECT 1 FROM tickets t WHERE t.user_id = u.id AND t.event_id = e.id);
 
-INSERT INTO tickets (user_id, event_id, type, status, reference_code, amount_paid)
-SELECT u.id, e.id, 'free', 'cancelled', 'TKT7C5V9B1L8Z', 0.00
+INSERT INTO tickets (user_id, event_id, attendee_name, attendee_email, type, status, reference_code, amount_paid)
+SELECT u.id, e.id, u.name, u.email, 'free', 'cancelled', 'TKT7C5V9B1L8Z', 0.00
 FROM users u, events e
 WHERE u.email = 'student@hkstu.edu' AND e.title = 'Design Portfolio Workshop'
 AND NOT EXISTS (SELECT 1 FROM tickets t WHERE t.user_id = u.id AND t.event_id = e.id);

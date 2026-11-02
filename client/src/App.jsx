@@ -3,6 +3,7 @@ import Navbar from './components/Navbar.jsx'
 import ProtectedRoute from './components/ProtectedRoute.jsx'
 import CreateEventPage from './pages/CreateEventPage.jsx'
 import AdminEventsPage from './pages/AdminEventsPage.jsx'
+import TicketCheckoutPage from './pages/TicketCheckoutPage.jsx'
 import DashboardPage from './pages/DashboardPage.jsx'
 import EventDetailPage from './pages/EventDetailPage.jsx'
 import EventsPage from './pages/EventsPage.jsx'
@@ -29,6 +30,14 @@ export default function App() {
               }
             />
             <Route path="/events" element={<EventsPage />} />
+            <Route
+              path="/events/:id/checkout"
+              element={
+                <ProtectedRoute>
+                  <TicketCheckoutPage />
+                </ProtectedRoute>
+              }
+            />
             <Route path="/events/:id" element={<EventDetailPage />} />
             <Route path="/login" element={<LoginPage />} />
             <Route path="/register" element={<RegisterPage />} />

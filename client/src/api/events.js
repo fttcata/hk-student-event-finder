@@ -109,3 +109,11 @@ export async function cancelEvent(id) {
   const data = await apiDelete(`/events/${encodeURIComponent(id)}`)
   return normalizeEvent(data.event)
 }
+
+export async function bookEventTickets(id, { attendees }) {
+  const data = await apiPost(`/events/${encodeURIComponent(id)}/tickets`, {
+    quantity: attendees.length,
+    attendees,
+  })
+  return data
+}
