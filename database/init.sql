@@ -37,13 +37,25 @@ CREATE TABLE IF NOT EXISTS events (
   registration_deadline DATETIME NULL,
   event_type ENUM('standard', 'fundraiser') NOT NULL DEFAULT 'standard',
   capacity INT UNSIGNED NOT NULL DEFAULT 0,
+  -- Stored counter, decremented by the booking transaction and restored on cancellation.
+  available_tickets INT UNSIGNED NOT NULL DEFAULT 0,
   price DECIMAL(8,2) NOT NULL DEFAULT 0.00,
   goal_amount DECIMAL(10,2) NULL,
   status ENUM('draft', 'published', 'cancelled') NOT NULL DEFAULT 'published',
   image_url VARCHAR(500) NULL,
+  -- Scraped events only. source IS NULL means the event was created in this app; anything else
+  -- names the website it came from, and the API treats that event as read-only.
+  source VARCHAR(30) NULL,
+  source_id VARCHAR(64) NULL,
+  source_url VARCHAR(500) NULL,
+  source_organizer VARCHAR(200) NULL,
+  fee_text VARCHAR(150) NULL,
+  end_date DATETIME NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
+  -- Lets each scrape update an event it already stored. Multiple NULLs are allowed, so app events are unaffected.
+  UNIQUE KEY uq_events_source (source, source_id),
   -- RESTRICT: removing a category or an organizer must not silently delete events
   -- (and with them other students' tickets and pledges). Cancel events instead.
   CONSTRAINT fk_events_category
@@ -65,23 +77,31 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE TABLE IF NOT EXISTS tickets (
   id INT UNSIGNED NOT NULL AUTO_INCREMENT,
   user_id INT UNSIGNED NOT NULL,
+  purchased_by INT UNSIGNED NOT NULL,
   event_id INT UNSIGNED NOT NULL,
+  attendee_name VARCHAR(120) NOT NULL,
+  attendee_email VARCHAR(160) NOT NULL,
   type ENUM('free', 'paid') NOT NULL DEFAULT 'free',
   status ENUM('confirmed', 'cancelled') NOT NULL DEFAULT 'confirmed',
-  reference_code VARCHAR(24) NOT NULL,
+  ticket_code VARCHAR(36) NOT NULL,
   amount_paid DECIMAL(8,2) NOT NULL DEFAULT 0.00,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   UNIQUE KEY uq_tickets_user_event (user_id, event_id),
-  UNIQUE KEY uq_tickets_reference (reference_code),
+  UNIQUE KEY uq_tickets_code (ticket_code),
   -- RESTRICT: tickets are receipts; they must outlive neither their event nor their holder by accident.
   CONSTRAINT fk_tickets_user
     FOREIGN KEY (user_id) REFERENCES users (id)
     ON DELETE RESTRICT ON UPDATE CASCADE,
+  -- purchased_by is the student who paid; user_id is the student who holds/attends.
+  CONSTRAINT fk_tickets_buyer
+    FOREIGN KEY (purchased_by) REFERENCES users (id)
+    ON DELETE RESTRICT ON UPDATE CASCADE,
   CONSTRAINT fk_tickets_event
     FOREIGN KEY (event_id) REFERENCES events (id)
     ON DELETE RESTRICT ON UPDATE CASCADE,
-  INDEX idx_tickets_event (event_id)
+  INDEX idx_tickets_event (event_id),
+  INDEX idx_tickets_buyer (purchased_by)
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS pledges (
@@ -144,7 +164,7 @@ CREATE TABLE IF NOT EXISTS email_log (
   id INT UNSIGNED NOT NULL AUTO_INCREMENT,
   user_id INT UNSIGNED NOT NULL,
   type ENUM('booking', 'donation', 'reminder', 'verification') NOT NULL,
-  reference_code VARCHAR(24) NULL,
+  reference_code VARCHAR(36) NULL,
   status ENUM('sent', 'failed') NOT NULL DEFAULT 'sent',
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
@@ -188,6 +208,11 @@ INSERT INTO users (name, email, password_hash, role, student_id, university, is_
 SELECT 'Pending Student', 'pending@connect.hku.hk', '$2b$10$placeholderhashtokennotarealcredential0000000000000000000000', 'student', 'HK20260002', 'HKU', FALSE, 'VRF7K3M2Q9P4XN8D', NULL
 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM users WHERE email = 'pending@connect.hku.hk');
 
+-- Owns scraped events (events.organizer_id is required). The placeholder hash never matches, so nobody can log in as it.
+INSERT INTO users (name, email, password_hash, role, student_id, university, is_verified, verification_code, verified_at)
+SELECT 'HKU CEDARS', 'cedars-scraper@campushub.local', '$2b$10$placeholderhashtokennotarealcredential0000000000000000000000', 'organizer', NULL, 'HKU', TRUE, NULL, CURRENT_TIMESTAMP
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM users WHERE email = 'cedars-scraper@campushub.local');
+
 -- Seed times are UTC: 18:00, 12:00, 14:00 and 09:00 Hong Kong time; deadlines are 23:59 HKT the day before.
 INSERT INTO events (title, description, category_id, organizer_id, location, address, latitude, longitude, event_date, registration_deadline, event_type, capacity, price, goal_amount, status)
 SELECT 'Campus Innovation Night', 'An evening of student demos and ideas.', c.id, u.id, 'Central Campus', 'Main Building, Pok Fu Lam Road, HKU', 22.2830000, 114.1370000, '2026-10-03 10:00:00', '2026-10-02 15:59:00', 'standard', 120, 0.00, NULL, 'published'
@@ -209,23 +234,40 @@ SELECT 'Food Bank Drive 2026', 'Raise funds for the HK Food Bank. Every pledge c
 FROM categories c, users u WHERE c.name = 'Charity' AND u.email = 'organizer@hkstu.edu'
 AND NOT EXISTS (SELECT 1 FROM events e WHERE e.title = 'Food Bank Drive 2026');
 
-INSERT INTO tickets (user_id, event_id, type, status, reference_code, amount_paid)
-SELECT u.id, e.id, 'free', 'confirmed', 'TKT9W2R4K7M1', 0.00
+INSERT INTO tickets (user_id, purchased_by, event_id, type, status, ticket_code, amount_paid)
+SELECT u.id, u.id, e.id, 'free', 'confirmed', '11111111-1111-4111-8111-111111111111', 0.00
 FROM users u, events e
 WHERE u.email = 'student@hkstu.edu' AND e.title = 'Campus Innovation Night'
 AND NOT EXISTS (SELECT 1 FROM tickets t WHERE t.user_id = u.id AND t.event_id = e.id);
 
-INSERT INTO tickets (user_id, event_id, type, status, reference_code, amount_paid)
-SELECT u.id, e.id, 'paid', 'confirmed', 'TKT4H8N2P6Q3X', 20.00
+INSERT INTO tickets (user_id, purchased_by, event_id, type, status, ticket_code, amount_paid)
+SELECT u.id, u.id, e.id, 'paid', 'confirmed', '22222222-2222-4222-8222-222222222222', 20.00
 FROM users u, events e
 WHERE u.email = 'student@hkstu.edu' AND e.title = 'International Food Fair'
 AND NOT EXISTS (SELECT 1 FROM tickets t WHERE t.user_id = u.id AND t.event_id = e.id);
 
-INSERT INTO tickets (user_id, event_id, type, status, reference_code, amount_paid)
-SELECT u.id, e.id, 'free', 'cancelled', 'TKT7C5V9B1L8Z', 0.00
+INSERT INTO tickets (user_id, purchased_by, event_id, type, status, ticket_code, amount_paid)
+SELECT u.id, u.id, e.id, 'free', 'cancelled', '33333333-3333-4333-8333-333333333333', 0.00
 FROM users u, events e
 WHERE u.email = 'student@hkstu.edu' AND e.title = 'Design Portfolio Workshop'
 AND NOT EXISTS (SELECT 1 FROM tickets t WHERE t.user_id = u.id AND t.event_id = e.id);
+
+-- Every organizer holds a free ticket to their own event (it does not take a seat).
+-- Also works as a backfill: run it once against a database created before this rule.
+INSERT INTO tickets (user_id, purchased_by, event_id, type, status, ticket_code, amount_paid)
+SELECT e.organizer_id, e.organizer_id, e.id, 'free', 'confirmed', UUID(), 0.00
+FROM events e
+WHERE NOT EXISTS (SELECT 1 FROM tickets t WHERE t.user_id = e.organizer_id AND t.event_id = e.id);
+
+-- Derive the stored counter from the seed tickets (confirmed seats only).
+UPDATE events e
+SET e.available_tickets = GREATEST(
+  e.capacity - (
+    SELECT COUNT(*) FROM tickets t
+    WHERE t.event_id = e.id AND t.status = 'confirmed' AND t.user_id <> e.organizer_id
+  ),
+  0
+);
 
 INSERT INTO pledges (event_id, user_id, amount, reference_code)
 SELECT e.id, u.id, 100.00, 'PLG5T3Y8U2I6'
@@ -264,10 +306,10 @@ WHERE u.email = 'student@hkstu.edu' AND e.title = 'Campus Innovation Night'
 AND NOT EXISTS (SELECT 1 FROM reviews r WHERE r.event_id = e.id AND r.user_id = u.id);
 
 INSERT INTO email_log (user_id, type, reference_code, status)
-SELECT u.id, 'booking', 'TKT9W2R4K7M1', 'sent'
+SELECT u.id, 'booking', '11111111-1111-4111-8111-111111111111', 'sent'
 FROM users u
 WHERE u.email = 'student@hkstu.edu'
-AND NOT EXISTS (SELECT 1 FROM email_log el WHERE el.reference_code = 'TKT9W2R4K7M1');
+AND NOT EXISTS (SELECT 1 FROM email_log el WHERE el.reference_code = '11111111-1111-4111-8111-111111111111');
 
 INSERT INTO email_log (user_id, type, reference_code, status)
 SELECT u.id, 'donation', 'PLG5T3Y8U2I6', 'sent'

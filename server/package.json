@@ -4,10 +4,12 @@
   "type": "module",
   "scripts": {
     "dev": "nodemon src/index.js",
-    "start": "node src/index.js"
+    "start": "node src/index.js",
+    "scrape:cedars": "node scripts/scrapeCedars.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
+    "cheerio": "^1.2.0",
     "cors": "^2.8.6",
     "dotenv": "^18.0.2",
     "express": "^5.2.1",

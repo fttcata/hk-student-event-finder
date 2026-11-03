@@ -7,6 +7,15 @@ const smtpConfigured = Boolean(
 
 const FROM = process.env.SMTP_FROM || process.env.SMTP_USER
 
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;')
+}
+
 export const transporter = smtpConfigured
   ? nodemailer.createTransport({
       host: process.env.SMTP_HOST,
@@ -36,6 +45,19 @@ export async function reportSmtpStatus() {
   } catch (error) {
     console.warn(`SMTP check failed, email receipts will be logged as failed: ${error.message}`)
   }
+}
+
+export async function sendVerificationEmail({ name, email, code }) {
+  if (!transporter) throw new Error('SMTP is not configured')
+  const safeName = escapeHtml(name)
+  const safeCode = escapeHtml(code)
+  return transporter.sendMail({
+    from: FROM,
+    to: email,
+    subject: 'Verify your Campus Hub account',
+    html: `<div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;color:#202020"><h1>Verify your Campus Hub account</h1><p>Hi ${safeName},</p><p>Use this verification code to activate your account:</p><p style="font-size:24px;font-weight:bold;letter-spacing:3px">${safeCode}</p><p>This code can only be used once.</p></div>`,
+    text: [`Hi ${name},`, '', 'Use this verification code to activate your Campus Hub account:', code, '', 'This code can only be used once.'].join('\n'),
+  })
 }
 
 // Throws when SMTP is not configured or the send fails; callers record the outcome in email_log.
@@ -71,20 +93,50 @@ export async function sendTicketReceipt({ user, event, ticket }) {
   return transporter.sendMail({
     from: FROM,
     to: user.email,
-    subject: `Ticket confirmed ${ticket.reference_code} — ${event.title}`,
-    html: generateTicketEmailHTML(user.name, event.title, ticket.reference_code, ticket.amount_paid, new Date(event.date).toISOString()),
+    subject: `Ticket confirmed ${ticket.ticket_code} — ${event.title}`,
+    html: generateTicketEmailHTML(user.name, event.title, ticket.ticket_code, ticket.amount_paid, new Date(event.date).toISOString()),
     text: [
       `Hi ${user.name},`,
       '',
       `Your ticket for "${event.title}" is confirmed.`,
       '',
-      `Ticket code: ${ticket.reference_code}`,
+      `Ticket code: ${ticket.ticket_code}`,
       `Type: ${ticket.type}`,
       `Date: ${new Date(event.date).toISOString()}`,
       `Location: ${event.location}`,
       `Amount paid: ${amount}`,
       '',
       'Show this email (or the ticket code) at the entrance.',
+      '— Campus Hub',
+    ].join('\n'),
+  })
+}
+
+// Sent to the buyer when they book seats for other students. Each attendee still gets their own
+// ticket receipt above; this message is the buyer's record of the whole purchase.
+export async function sendBookingSummary({ user, event, tickets }) {
+  if (!transporter) throw new Error('SMTP is not configured')
+
+  const total = tickets.reduce((sum, ticket) => sum + Number(ticket.amount_paid), 0)
+  return transporter.sendMail({
+    from: FROM,
+    to: user.email,
+    subject: `Group booking confirmed — ${event.title}`,
+    text: [
+      `Hi ${user.name},`,
+      '',
+      `You booked ${tickets.length} ticket(s) for "${event.title}".`,
+      '',
+      ...tickets.map(
+        (ticket) =>
+          `${ticket.ticket_code} — ${ticket.attendee.name} <${ticket.attendee.email}>`,
+      ),
+      '',
+      `Event date: ${new Date(event.date).toISOString()}`,
+      `Location: ${event.location}`,
+      `Total paid: HK$${total.toFixed(2)}`,
+      '',
+      'Each attendee has received their own ticket email with their code.',
       '— Campus Hub',
     ].join('\n'),
   })

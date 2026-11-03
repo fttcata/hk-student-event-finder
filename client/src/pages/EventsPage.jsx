@@ -8,6 +8,7 @@ import { UNIVERSITIES } from '../utils/universities.js'
 
 const KIND_FILTERS = [
   ['all', 'All'],
+  ['scraped', 'Web-scraped'],
   ['free', 'Free'],
   ['paid', 'Paid'],
   ['fundraiser', 'Fundraisers'],
@@ -32,14 +33,18 @@ export default function EventsPage() {
   const filtered = useMemo(() => {
     const keyword = query.trim().toLowerCase()
     return events
-      .filter((event) => kind === 'all' || getEventKind(event) === kind)
+      .filter((event) => {
+        if (kind === 'all') return true
+        if (kind === 'scraped') return event.isScraped || event.isExternal
+        return !(event.isScraped || event.isExternal) && getEventKind(event) === kind
+      })
       .filter((event) => university === 'all' || event.university === university)
       .filter((event) => {
         if (!keyword) return true
         const text = [event.title, event.description, event.location, event.category, event.organizer].join(' ')
         return text.toLowerCase().includes(keyword)
       })
-      .sort(byDate)
+      .sort((a, b) => Number(b.isScraped) - Number(a.isScraped) || byDate(a, b))
   }, [events, query, kind, university])
 
   return (

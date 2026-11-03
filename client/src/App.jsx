@@ -1,7 +1,10 @@
 import { Route, Routes } from 'react-router-dom'
 import Navbar from './components/Navbar.jsx'
+import FloatingEventChat from './components/FloatingEventChat.jsx'
 import ProtectedRoute from './components/ProtectedRoute.jsx'
 import CreateEventPage from './pages/CreateEventPage.jsx'
+import AdminEventsPage from './pages/AdminEventsPage.jsx'
+import TicketCheckoutPage from './pages/TicketCheckoutPage.jsx'
 import DashboardPage from './pages/DashboardPage.jsx'
 import EventDetailPage from './pages/EventDetailPage.jsx'
 import EventsPage from './pages/EventsPage.jsx'
@@ -10,6 +13,7 @@ import LoginPage from './pages/LoginPage.jsx'
 import NotFoundPage from './pages/NotFoundPage.jsx'
 import Profile from './pages/Profile.jsx'
 import RegisterPage from './pages/RegisterPage.jsx'
+import VerifyPage from './pages/VerifyPage.jsx'
 
 // Every URL in the SPA and which page it renders. Protected pages require login.
 export default function App() {
@@ -19,10 +23,27 @@ export default function App() {
         <div className="flex-1">
           <Routes>
             <Route path="/" element={<HomePage />} />
+            <Route
+              path="/admin/events"
+              element={
+                <ProtectedRoute role="admin">
+                  <AdminEventsPage />
+                </ProtectedRoute>
+              }
+            />
             <Route path="/events" element={<EventsPage />} />
+            <Route
+              path="/events/:id/checkout"
+              element={
+                <ProtectedRoute>
+                  <TicketCheckoutPage />
+                </ProtectedRoute>
+              }
+            />
             <Route path="/events/:id" element={<EventDetailPage />} />
             <Route path="/login" element={<LoginPage />} />
             <Route path="/register" element={<RegisterPage />} />
+            <Route path="/verify" element={<VerifyPage />} />
             <Route
               path="/profile"
               element={
@@ -62,6 +83,7 @@ export default function App() {
             <Route path="*" element={<NotFoundPage />} />
           </Routes>
         </div>
+        <FloatingEventChat />
         <footer className="border-t border-line">
           <div className="mx-auto flex max-w-6xl flex-col justify-between gap-2 px-4 py-6 font-mono text-xs text-muted sm:flex-row sm:px-6">
             <span>◒ Campus Hub · COMP3322 group project</span>

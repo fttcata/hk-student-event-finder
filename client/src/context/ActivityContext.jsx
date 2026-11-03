@@ -16,7 +16,8 @@ export function ActivityProvider({ children }) {
   const [bookmarks, setBookmarks] = usePersistentState(`campushub:bookmarks:${userKey}`, [])
   const [createdEvents, setCreatedEvents] = usePersistentState('campushub:created-events', [])
 
-  function bookTicket(event, quantity) {
+  function bookTicket(event, attendees) {
+    const quantity = attendees.length
     const seatsLeft = event.capacity > 0 ? event.capacity - event.booked : Infinity
     if (quantity > seatsLeft) throw new Error('Sorry, there are not enough seats left.')
 
@@ -28,6 +29,10 @@ export function ActivityProvider({ children }) {
       location: event.location,
       quantity,
       total: event.price * quantity,
+      attendees: attendees.map((attendee) => ({
+        ...attendee,
+        reference: createReference('TKT'),
+      })),
       createdAt: new Date().toISOString(),
     }
     setBookings((current) => [booking, ...current])

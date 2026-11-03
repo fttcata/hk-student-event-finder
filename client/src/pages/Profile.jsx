@@ -43,6 +43,7 @@ export default function Profile() {
           <article key={ticket.id} style={{ background: '#fff', padding: '1rem', marginTop: '0.75rem', borderRadius: '8px' }}>
             <h3>{ticket.event.title}</h3>
             <p>{formatDateTime(ticket.event.date)} · {ticket.event.location}</p>
+            <p><strong>Attendee:</strong> {ticket.attendee_name} · {ticket.attendee_email}</p>
             <p><strong>Unique code:</strong> {ticket.reference_code}</p>
             <p><strong>Price paid:</strong> {formatMoney(ticket.amount_paid)}</p>
           </article>

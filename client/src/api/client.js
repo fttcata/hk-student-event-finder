@@ -7,10 +7,22 @@ export async function apiGet(path) {
 }
 
 export async function apiPost(path, body) {
+  return apiRequest(path, 'POST', body)
+}
+
+export async function apiPut(path, body) {
+  return apiRequest(path, 'PUT', body)
+}
+
+export async function apiDelete(path) {
+  return apiRequest(path, 'DELETE')
+}
+
+async function apiRequest(path, method, body) {
   const response = await fetch(`${API_BASE_URL}${path}`, {
-    method: 'POST',
-    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    method,
+    headers: body === undefined ? authHeaders() : { ...authHeaders(), 'Content-Type': 'application/json' },
+    ...(body !== undefined && { body: JSON.stringify(body) }),
   })
   const data = await response.json().catch(() => ({}))
   if (!response.ok) {
@@ -21,7 +33,9 @@ export async function apiPost(path, body) {
 
 async function requestError(response) {
   const data = await response.json().catch(() => ({}))
-  return new Error(data.error || `Request failed with status ${response.status}`)
+  const error = new Error(data.error || `Request failed with status ${response.status}`)
+  error.status = response.status
+  return error
 }
 
 function authHeaders() {
