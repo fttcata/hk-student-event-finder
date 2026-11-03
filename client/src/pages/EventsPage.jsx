@@ -35,8 +35,8 @@ export default function EventsPage() {
     return events
       .filter((event) => {
         if (kind === 'all') return true
-        if (kind === 'scraped') return event.isScraped
-        return !event.isScraped && getEventKind(event) === kind
+        if (kind === 'scraped') return event.isScraped || event.isExternal
+        return !(event.isScraped || event.isExternal) && getEventKind(event) === kind
       })
       .filter((event) => university === 'all' || event.university === university)
       .filter((event) => {

@@ -13,20 +13,21 @@ const KIND_STYLES = {
 export default function EventCard({ event }) {
   const kind = getEventKind(event)
   const seatsLeft = event.capacity - event.booked
-  const cardKind = event.isScraped ? 'scraped' : kind
-  const originalUrl = event.isScraped ? getSafeExternalUrl(event.originalUrl) : null
+  const external = event.isScraped || event.isExternal
+  const cardKind = external ? 'scraped' : kind
+  const originalUrl = external ? getSafeExternalUrl(event.originalUrl) : null
 
   return (
     <article className={`flex min-h-64 flex-col border-t-[3px] p-6 ${KIND_STYLES[cardKind]}`}>
       <div className="flex items-center justify-between gap-3 font-mono text-xs text-muted">
         <span>{formatDate(event.date)}</span>
-        <span className="badge">{event.isScraped ? 'Web-scraped' : KIND_LABELS[kind]}</span>
+        <span className="badge">{external ? 'Web-scraped' : KIND_LABELS[kind]}</span>
       </div>
 
       <h3 className="display mt-auto pt-8 text-2xl">{event.title}</h3>
       <p className="mt-2 text-sm text-muted">{event.category}{event.location ? ` · ${event.location}` : ''}</p>
 
-      {!event.isScraped && (
+      {!external && (
         <div className="mt-4 text-xs text-muted">
           {kind === 'fundraiser' ? (
             <>
@@ -44,7 +45,7 @@ export default function EventCard({ event }) {
         </div>
       )}
 
-      {event.isScraped ? (
+      {external ? (
         originalUrl ? (
           <a
             href={originalUrl}

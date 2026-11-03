@@ -2,8 +2,10 @@ import bcrypt from 'bcryptjs'
 import crypto from 'node:crypto'
 import { Router } from 'express'
 import { signToken } from '../config/jwt.js'
+import { sendVerificationEmail } from '../config/email.js'
 import { requireAuth } from '../middleware/auth.js'
 import { findUserWithPasswordByEmail, insertStudent, markUserVerified } from '../queries/users.js'
+import { logEmail } from '../queries/emailLog.js'
 import { serializeUser } from '../utils/users.js'
 
 // Must match client/src/utils/universities.js — only these student email domains may sign up.
@@ -76,12 +78,20 @@ router.post('/register', async (request, response) => {
       is_verified: false,
     })
 
-    // The verification code stays server-side until the email service sends it.
+    let verificationEmailSent = false
+    try {
+      await sendVerificationEmail({ name: name.trim(), email: normalizedEmail, code: verificationCode })
+      verificationEmailSent = true
+    } catch (error) {
+      console.error(`Verification email for ${normalizedEmail} was not sent: ${error.message}`)
+    }
+    await logEmail(userId, 'verification', verificationCode, verificationEmailSent)
+
     if (process.env.NODE_ENV !== 'production') {
       console.log(`Verification code for ${normalizedEmail}: ${verificationCode}`)
     }
 
-    return response.status(201).json({ token: signToken(user), user })
+    return response.status(201).json({ token: signToken(user), user, verification_email_sent: verificationEmailSent })
   } catch (error) {
     if (error.code === 'ER_DUP_ENTRY') {
       return response.status(409).json({ error: 'An account with this email already exists' })

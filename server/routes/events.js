@@ -683,6 +683,11 @@ async function sendBookingEmails({ buyer, event, tickets }) {
       logEmail(ticket.user_id, 'booking', ticket.ticket_code, ticketResults[index].status === 'fulfilled'),
     ),
   )
+  return tickets.map((ticket, index) => ({
+    reference_code: ticket.ticket_code,
+    email: ticket.attendee.email,
+    sent: ticketResults[index].status === 'fulfilled',
+  }))
 }
 
 // Protected, verified students only (HANDOFF.md §1). Each attendee gets their own ticket row and
@@ -815,15 +820,19 @@ router.post('/:id/tickets', requireAuth, rejectExternalEvent, async (request, re
   // Re-fetched after commit, so available_tickets reflects this booking.
   const event = await selectEventById(eventId, request.user)
 
-  // Fire-and-forget: the endpoint returns once the booking is durable, while Nodemailer and the
-  // email_log inserts continue in the background.
-  setImmediate(() => {
-    sendBookingEmails({ buyer: request.user, event, tickets }).catch((error) => {
-      console.error(`Booking emails for ${tickets.map((ticket) => ticket.ticket_code).join(', ')} failed: ${error.message}`)
-    })
-  })
+  let receiptEmails
+  try {
+    receiptEmails = await sendBookingEmails({ buyer: request.user, event, tickets })
+  } catch (error) {
+    console.error(`Booking emails for ${tickets.map((ticket) => ticket.ticket_code).join(', ')} failed: ${error.message}`)
+    receiptEmails = tickets.map((ticket) => ({
+      reference_code: ticket.ticket_code,
+      email: ticket.attendee.email,
+      sent: false,
+    }))
+  }
 
-  return response.status(201).json({ tickets, ticket: tickets[0], event, email_queued: true })
+  return response.status(201).json({ tickets, ticket: tickets[0], event, receipt_emails: receiptEmails })
 })
 
 // Protected. Cancelling releases the seat and restores the stored counter; the row stays as a

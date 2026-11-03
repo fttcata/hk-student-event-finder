@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { fetchEvents } from '../api/events.js'
+import { fetchAllEvents } from '../api/events.js'
 import { useActivity } from '../context/ActivityContext.jsx'
 
 // Single source of events for every page: API (or demo) events + events created in this browser,
@@ -10,7 +10,7 @@ export function useEvents() {
 
   useEffect(() => {
     let ignore = false
-    fetchEvents().then((data) => {
+    fetchAllEvents().then((data) => {
       if (!ignore) setResult(data)
     })
     return () => {
