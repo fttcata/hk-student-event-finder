@@ -27,6 +27,14 @@ export async function requireAuth(request, response, next) {
   return next()
 }
 
+export async function requireAdmin(request, response, next) {
+  const { user, error } = await authenticate(request)
+  if (error) return response.status(401).json({ error })
+  if (user.role !== 'admin') return response.status(403).json({ error: 'Administrator access required' })
+  request.user = user
+  return next()
+}
+
 // For public routes that reveal more to signed-in users: sets req.user when a valid token
 // is sent, otherwise req.user = null. A stale token never blocks a public page.
 export async function optionalAuth(request, _response, next) {

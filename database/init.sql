@@ -79,6 +79,8 @@ CREATE TABLE IF NOT EXISTS tickets (
   user_id INT UNSIGNED NOT NULL,
   purchased_by INT UNSIGNED NOT NULL,
   event_id INT UNSIGNED NOT NULL,
+  attendee_name VARCHAR(120) NOT NULL,
+  attendee_email VARCHAR(160) NOT NULL,
   type ENUM('free', 'paid') NOT NULL DEFAULT 'free',
   status ENUM('confirmed', 'cancelled') NOT NULL DEFAULT 'confirmed',
   ticket_code VARCHAR(36) NOT NULL,

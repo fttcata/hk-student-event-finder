@@ -56,6 +56,15 @@ export function byDate(a, b) {
   return new Date(a.date) - new Date(b.date)
 }
 
+export function getSafeExternalUrl(value) {
+  try {
+    const url = new URL(value)
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : null
+  } catch {
+    return null
+  }
+}
+
 // Converts an ISO date into the "YYYY-MM-DDTHH:mm" format that <input type="datetime-local"> expects.
 export function toDateTimeInput(value) {
   const date = new Date(value)

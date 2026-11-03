@@ -16,6 +16,8 @@ router.get('/me/tickets', requireAuth, async (request, response) => {
     type: row.type,
     status: row.status,
     amount_paid: row.amount_paid,
+    attendee_name: row.attendee_name,
+    attendee_email: row.attendee_email,
     booked_at: row.created_at,
     event: {
       id: row.event_id,

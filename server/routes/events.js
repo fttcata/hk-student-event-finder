@@ -39,6 +39,8 @@ const SOURCE_FILTERS = ['app', 'external']
 const DEFAULT_PAGE = 1
 const DEFAULT_LIMIT = 12
 const MAX_LIMIT = 50
+const MAX_TICKET_QUANTITY = 4
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 // Organizer contact details (email, student ID) are only shown to signed-in viewers.
 function serializeOrganizer(row, viewer) {
@@ -298,7 +300,7 @@ function normalizeEventType(value) {
 
 // Shared by POST and PUT: validates an event payload and returns { error } or { values },
 // where values is keyed by events column name, ready for INSERT ... SET ? / UPDATE ... SET ?.
-async function parseEventInput(body) {
+async function parseEventInput(body, { allowPastDate = false } = {}) {
   const eventType = normalizeEventType(body.event_type ?? body.type)
 
   const title = typeof body.title === 'string' ? body.title.trim() : ''
@@ -335,7 +337,7 @@ async function parseEventInput(body) {
   if (typeof body.date !== 'string' || Number.isNaN(startsAt.getTime())) {
     return { error: 'date must be a valid date' }
   }
-  if (startsAt <= new Date()) {
+  if (!allowPastDate && startsAt <= new Date()) {
     return { error: 'The event must be in the future' }
   }
 
@@ -485,7 +487,7 @@ async function findOwnedEvent(connection, rawId, user) {
 
   const row = await lockEventRow(connection, eventId)
   if (!row) return { status: 404, ...EVENT_NOT_FOUND }
-  if (row.organizer_id !== user.id) {
+  if (row.organizer_id !== user.id && user.role !== 'admin') {
     return { status: 403, error: 'Only the event organizer can change this event' }
   }
   return { row }
@@ -518,7 +520,10 @@ router.put('/:id', requireAuth, rejectExternalEvent, async (request, response) =
       goal: row.goal_amount,
       category: row.category,
     }
-    const { error: inputError, values } = await parseEventInput({ ...current, ...(request.body ?? {}) })
+    const { error: inputError, values } = await parseEventInput(
+      { ...current, ...(request.body ?? {}) },
+      { allowPastDate: row.event_date <= new Date() },
+    )
     if (inputError) return { status: 400, body: { error: inputError } }
 
     // Existing tickets and pledges must stay valid after the edit.
@@ -691,10 +696,28 @@ router.post('/:id/tickets', requireAuth, rejectExternalEvent, async (request, re
   const eventId = parseEventId(request.params.id)
   if (eventId === null) return response.status(404).json(EVENT_NOT_FOUND)
 
-  const { emails, error: attendeeError } = parseAttendees(request.body, request.user.email)
-  if (attendeeError) return response.status(400).json({ error: attendeeError })
+  const { quantity, attendees } = request.body ?? {}
+  if (!Number.isInteger(quantity) || quantity < 1 || quantity > MAX_TICKET_QUANTITY) {
+    return response.status(400).json({ error: `quantity must be a whole number between 1 and ${MAX_TICKET_QUANTITY}` })
+  }
+  if (!Array.isArray(attendees) || attendees.length !== quantity) {
+    return response.status(400).json({ error: 'Provide one attendee name and email for each ticket' })
+  }
 
-  const ticketCodes = []
+  const normalizedAttendees = []
+  for (const [index, attendee] of attendees.entries()) {
+    const name = typeof attendee?.name === 'string' ? attendee.name.trim() : ''
+    const email = typeof attendee?.email === 'string' ? attendee.email.trim().toLowerCase() : ''
+    if (!name || name.length > 120) {
+      return response.status(400).json({ error: `Attendee ${index + 1} name must be between 1 and 120 characters` })
+    }
+    if (!EMAIL_PATTERN.test(email) || email.length > 160) {
+      return response.status(400).json({ error: `Attendee ${index + 1} email must be valid and at most 160 characters` })
+    }
+    normalizedAttendees.push({ name, email })
+  }
+
+  const ticketIds = []
   const earlyResponse = await withTransaction(async (connection) => {
     const event = await lockEventForBooking(connection, eventId)
     if (!event) return { status: 404, body: EVENT_NOT_FOUND }
@@ -753,6 +776,7 @@ router.post('/:id/tickets', requireAuth, rejectExternalEvent, async (request, re
         status: 409,
         body: { error: `Not enough seats left (${event.available_tickets} available)` },
       }
+      if (!inserted) throw new Error('Could not generate a unique ticket reference')
     }
     await reserveSeats(connection, eventId, seats)
 
