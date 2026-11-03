@@ -47,7 +47,7 @@ erDiagram
         varchar address
         decimal latitude
         decimal longitude
-        date event_date
+        datetime event_date
         datetime registration_deadline
         enum event_type "standard|fundraiser"
         int capacity
@@ -124,7 +124,10 @@ erDiagram
 ## Notes for reviewers
 
 - 9 tables total: `users`, `categories`, `events`, `tickets`, `pledges`, `chat_messages`, `reviews`, `email_log`, `bookmarks`
-- All FKs use `ON DELETE CASCADE` / `ON UPDATE CASCADE`
+- All FKs use `ON UPDATE CASCADE`. `ON DELETE` is `RESTRICT` for `events.category_id`, `events.organizer_id`
+  and both FKs of `tickets` and `pledges` (receipts must not disappear with a category, user or event —
+  cancel events via `status` instead); every other FK uses `ON DELETE CASCADE`
+- All `DATETIME`/`TIMESTAMP` values are UTC (`event_date` is the start instant, not just a day)
 - Fundraiser progress is computed live: `SELECT COALESCE(SUM(amount),0) FROM pledges WHERE event_id = ?`
 - `pledges` has no `UNIQUE(user_id, event_id)` — repeat donations are allowed by design
 - Chat time-window rules (open T-6h, close +7d) are enforced in Express middleware, not in SQL

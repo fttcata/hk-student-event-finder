@@ -10,7 +10,7 @@ export default function LoginPage() {
   const navigate = useNavigate()
   const location = useLocation()
   // Where ProtectedRoute wanted to send the user before asking them to log in.
-  const redirectTo = location.state?.from ?? '/dashboard'
+  const redirectTo = location.state?.from ?? '/events'
 
   const [form, setForm] = useState({ email: '', password: '' })
   const [errors, setErrors] = useState({})

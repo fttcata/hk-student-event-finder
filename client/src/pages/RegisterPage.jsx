@@ -44,7 +44,7 @@ export default function RegisterPage() {
     setSubmitError('')
     try {
       await register(form)
-      navigate(location.state?.from ?? '/dashboard', { replace: true })
+      navigate(location.state?.from ?? '/events', { replace: true })
     } catch (err) {
       setSubmitError(err.message)
       setSubmitting(false)
