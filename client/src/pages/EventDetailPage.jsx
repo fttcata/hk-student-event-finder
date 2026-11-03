@@ -363,7 +363,7 @@ export default function EventDetailPage() {
               <p className="mt-2 font-medium">{event.location}</p>
             </div>
             <MapEmbed query={event.location} className="h-72" />
-            <EventChatRoom event={event} />
+            <EventChatRoom key={event.id} event={event} />
           </section>
         </section>
 

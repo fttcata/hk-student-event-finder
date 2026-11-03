@@ -70,21 +70,51 @@ export async function sendTicketReceipt({ user, event, ticket }) {
   const amount = `HK$${Number(ticket.amount_paid).toFixed(2)}`
   return transporter.sendMail({
     from: FROM,
-    to: ticket.attendee_email ?? user.email,
-    subject: `Ticket confirmed ${ticket.reference_code} — ${event.title}`,
-    html: generateTicketEmailHTML(user.name, event.title, ticket.reference_code, ticket.amount_paid, new Date(event.date).toISOString()),
+    to: user.email,
+    subject: `Ticket confirmed ${ticket.ticket_code} — ${event.title}`,
+    html: generateTicketEmailHTML(user.name, event.title, ticket.ticket_code, ticket.amount_paid, new Date(event.date).toISOString()),
     text: [
       `Hi ${user.name},`,
       '',
       `Your ticket for "${event.title}" is confirmed.`,
       '',
-      `Ticket code: ${ticket.reference_code}`,
+      `Ticket code: ${ticket.ticket_code}`,
       `Type: ${ticket.type}`,
       `Date: ${new Date(event.date).toISOString()}`,
       `Location: ${event.location}`,
       `Amount paid: ${amount}`,
       '',
       'Show this email (or the ticket code) at the entrance.',
+      '— Campus Hub',
+    ].join('\n'),
+  })
+}
+
+// Sent to the buyer when they book seats for other students. Each attendee still gets their own
+// ticket receipt above; this message is the buyer's record of the whole purchase.
+export async function sendBookingSummary({ user, event, tickets }) {
+  if (!transporter) throw new Error('SMTP is not configured')
+
+  const total = tickets.reduce((sum, ticket) => sum + Number(ticket.amount_paid), 0)
+  return transporter.sendMail({
+    from: FROM,
+    to: user.email,
+    subject: `Group booking confirmed — ${event.title}`,
+    text: [
+      `Hi ${user.name},`,
+      '',
+      `You booked ${tickets.length} ticket(s) for "${event.title}".`,
+      '',
+      ...tickets.map(
+        (ticket) =>
+          `${ticket.ticket_code} — ${ticket.attendee.name} <${ticket.attendee.email}>`,
+      ),
+      '',
+      `Event date: ${new Date(event.date).toISOString()}`,
+      `Location: ${event.location}`,
+      `Total paid: HK$${total.toFixed(2)}`,
+      '',
+      'Each attendee has received their own ticket email with their code.',
       '— Campus Hub',
     ].join('\n'),
   })

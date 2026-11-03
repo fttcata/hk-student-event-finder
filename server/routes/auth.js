@@ -1,10 +1,10 @@
 import bcrypt from 'bcryptjs'
 import crypto from 'node:crypto'
 import { Router } from 'express'
-import { pool } from '../config/db.js'
 import { signToken } from '../config/jwt.js'
 import { requireAuth } from '../middleware/auth.js'
-import { USER_COLUMNS, serializeUser } from '../utils/users.js'
+import { findUserWithPasswordByEmail, insertStudent, markUserVerified } from '../queries/users.js'
+import { serializeUser } from '../utils/users.js'
 
 // Must match client/src/utils/universities.js — only these student email domains may sign up.
 const UNIVERSITY_DOMAINS = {
@@ -57,14 +57,17 @@ router.post('/register', async (request, response) => {
     const passwordHash = await bcrypt.hash(password, 10)
     const verificationCode = 'VRF' + crypto.randomBytes(7).toString('hex').toUpperCase().slice(0, 13)
 
-    const [result] = await pool.query(
-      `INSERT INTO users (name, email, password_hash, role, student_id, university, is_verified, verification_code)
-       VALUES (?, ?, ?, 'student', ?, ?, FALSE, ?)`,
-      [name.trim(), normalizedEmail, passwordHash, studentId?.trim() || null, university, verificationCode],
-    )
+    const userId = await insertStudent({
+      name: name.trim(),
+      email: normalizedEmail,
+      passwordHash,
+      studentId: studentId?.trim() || null,
+      university,
+      verificationCode,
+    })
 
     const user = serializeUser({
-      id: result.insertId,
+      id: userId,
       name: name.trim(),
       email: normalizedEmail,
       role: 'student',
@@ -97,10 +100,7 @@ router.post('/login', async (request, response) => {
     return response.status(401).json({ error: 'Invalid email or password' })
   }
 
-  const [[row]] = await pool.query(
-    `SELECT ${USER_COLUMNS}, password_hash FROM users WHERE email = ? LIMIT 1`,
-    [normalizedEmail],
-  )
+  const row = await findUserWithPasswordByEmail(normalizedEmail)
   if (!row || !(await bcrypt.compare(password, row.password_hash))) {
     return response.status(401).json({ error: 'Invalid email or password' })
   }
@@ -114,12 +114,8 @@ router.post('/verify', async (request, response) => {
   const code = typeof request.body?.code === 'string' ? request.body.code.trim().toUpperCase() : ''
   if (!email || !code) return response.status(400).json({ error: 'Email and verification code are required' })
 
-  const [result] = await pool.query(
-    `UPDATE users SET is_verified = TRUE, verification_code = NULL, verified_at = CURRENT_TIMESTAMP
-     WHERE email = ? AND verification_code = ? AND is_verified = FALSE`,
-    [email, code],
-  )
-  if (result.affectedRows !== 1) return response.status(400).json({ error: 'Invalid or expired verification code' })
+  const verified = await markUserVerified(email, code)
+  if (!verified) return response.status(400).json({ error: 'Invalid or expired verification code' })
   return response.json({ verified: true })
 })
 
