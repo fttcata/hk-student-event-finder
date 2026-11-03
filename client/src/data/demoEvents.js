@@ -104,4 +104,16 @@ export const demoEvents = [
     raised: 2150,
     organizer: 'CUHK Cat Club',
   },
+  {
+    id: 'scraped-preview-1',
+    title: 'Web-scraped preview: Student Tech Meetup',
+    description: 'Sample scraped event preview. Its original listing has the latest details.',
+    category: 'Technology',
+    type: 'web_scraped',
+    is_scraped: true,
+    original_url: 'https://example.com/events/student-tech-meetup',
+    date: '2026-11-18T18:00:00+08:00',
+    university: 'HKU',
+    organizer: 'Sample source',
+  },
 ]

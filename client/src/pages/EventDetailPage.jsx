@@ -1,18 +1,25 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import MapEmbed from '../components/MapEmbed.jsx'
 import ProgressBar from '../components/ProgressBar.jsx'
 import Receipt from '../components/Receipt.jsx'
 import CountdownTimer from '../components/CountdownTimer.jsx'
 import TicketCounter from '../components/TicketCounter.jsx'
-import TicketCheckoutModal from '../components/TicketCheckoutModal.jsx'
 import EventChatRoom from '../components/EventChatRoom.jsx'
 import FundraiserDonateModal from '../components/FundraiserDonateModal.jsx'
+import { cancelEvent, fetchEvent } from '../api/events.js'
 import { useActivity } from '../context/ActivityContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { useEvents } from '../hooks/useEvents.js'
 import { useNow } from '../hooks/useNow.js'
-import { formatDateTime, formatMoney, formatTimeLeft, getEventKind, KIND_LABELS } from '../utils/format.js'
+import {
+  formatDateTime,
+  formatMoney,
+  formatTimeLeft,
+  getEventKind,
+  getSafeExternalUrl,
+  KIND_LABELS,
+} from '../utils/format.js'
 import NotFoundPage from './NotFoundPage.jsx'
 
 const QUICK_AMOUNTS = [20, 50, 100, 200]
@@ -36,16 +43,12 @@ function Deadline({ deadline, now }) {
   )
 }
 
-// Free ticket claim, or paid ticket with a mock checkout step.
+// Select quantity here, then collect attendee details on the dedicated checkout page.
 function TicketPanel({ event }) {
   const { user } = useAuth()
-  const { bookTicket } = useActivity()
   const now = useNow()
+  const navigate = useNavigate()
   const [quantity, setQuantity] = useState(1)
-  const [step, setStep] = useState('select') // select → checkout (paid only) → done
-  const [receipt, setReceipt] = useState(null)
-  const [error, setError] = useState('')
-  const [checkoutOpen, setCheckoutOpen] = useState(false)
 
   const hasLimit = event.capacity > 0
   const seatsLeft = hasLimit ? event.capacity - event.booked : Infinity
@@ -53,31 +56,6 @@ function TicketPanel({ event }) {
   const isClosed = new Date(event.deadline) <= now
   const isPaid = event.price > 0
   const total = event.price * quantity
-
-  function confirmBooking() {
-    try {
-      setReceipt(bookTicket(event, quantity))
-      setStep('done')
-    } catch (err) {
-      setError(err.message)
-    }
-  }
-
-  if (step === 'done') {
-    return (
-      <Receipt
-        heading="Confirmation email sent!"
-        reference={receipt.reference}
-        email={user.email}
-        rows={[
-          ['Event', event.title],
-          ['When', formatDateTime(event.date)],
-          ['Tickets', receipt.quantity],
-          ['Total', isPaid ? formatMoney(receipt.total) : 'Free'],
-        ]}
-      />
-    )
-  }
 
   return (
     <div className="panel space-y-5">
@@ -102,28 +80,7 @@ function TicketPanel({ event }) {
       <Deadline deadline={event.deadline} now={now} />
       <CountdownTimer target={event.deadline} />
 
-      {step === 'checkout' ? (
-        <div className="space-y-4 border-t border-line pt-5">
-          <p className="eyebrow">Mock checkout</p>
-          <div className="flex justify-between text-sm">
-            <span>
-              {quantity} × {formatMoney(event.price)}
-            </span>
-            <span className="font-semibold">{formatMoney(total)}</span>
-          </div>
-          <p className="rounded-sm bg-peach/50 p-3 text-xs text-muted">
-            Demo payment: no card details are collected. Stripe is planned as a nice-to-have.
-          </p>
-          <div className="flex gap-2">
-            <button type="button" className="btn btn-outline flex-1" onClick={() => setStep('select')}>
-              Back
-            </button>
-            <button type="button" className="btn btn-accent flex-1" onClick={confirmBooking}>
-              Pay {formatMoney(total)}
-            </button>
-          </div>
-        </div>
-      ) : isFull || isClosed ? (
+      {isFull || isClosed ? (
         <button type="button" className="btn btn-dark w-full" disabled>
           {isFull ? 'Sold out' : 'Registration closed'}
         </button>
@@ -138,14 +95,12 @@ function TicketPanel({ event }) {
           <button
             type="button"
             className="btn btn-dark w-full"
-            onClick={() => setCheckoutOpen(true)}
+            onClick={() => navigate(`/events/${event.id}/checkout?quantity=${quantity}`)}
           >
-            {isPaid ? `Checkout · ${formatMoney(total)}` : 'Claim free ticket'}
+            {isPaid ? `Continue · ${formatMoney(total)}` : 'Continue to free ticket checkout'}
           </button>
         </div>
       )}
-      {error && <p className="text-sm text-accent">{error}</p>}
-      {checkoutOpen && <TicketCheckoutModal event={event} quantity={quantity} onClose={() => setCheckoutOpen(false)} onSuccess={(result) => { setCheckoutOpen(false); setReceipt({ reference: result.ticket.reference_code, quantity, total: Number(result.ticket.amount_paid) * quantity }); setStep('done') }} />}
     </div>
   )
 }
@@ -256,11 +211,91 @@ export default function EventDetailPage() {
   const { user } = useAuth()
   const { bookmarks, toggleBookmark } = useActivity()
   const { events, loading } = useEvents()
+  const listedEvent = events.find((e) => e.id === id)
+  const [detailResult, setDetailResult] = useState(null)
+  const currentDetailResult = detailResult?.id === id ? detailResult : null
+  const requestedEvent = currentDetailResult?.event ?? null
+  const detailError = currentDetailResult?.error ?? null
+  const detailLoading = !loading && !listedEvent && !currentDetailResult
+  const [adminError, setAdminError] = useState('')
+  const [canceling, setCanceling] = useState(false)
 
-  const event = events.find((e) => e.id === id)
+  useEffect(() => {
+    if (loading || listedEvent) return
 
-  if (loading) return <main className="mx-auto max-w-6xl px-4 py-16 text-muted sm:px-6">Loading event…</main>
+    let active = true
+    fetchEvent(id)
+      .then((result) => {
+        if (active) setDetailResult({ id, event: result })
+      })
+      .catch((requestError) => {
+        if (active) setDetailResult({ id, error: requestError })
+      })
+
+    return () => {
+      active = false
+    }
+  }, [id, loading, listedEvent])
+
+  const event = listedEvent ?? requestedEvent
+
+  if (loading || detailLoading) {
+    return <main className="mx-auto max-w-6xl px-4 py-16 text-muted sm:px-6">Loading event…</main>
+  }
+  if (detailError && detailError.status !== 404) {
+    return (
+      <main className="mx-auto max-w-6xl px-4 py-16 sm:px-6">
+        <p role="alert" className="text-accent">Unable to load this event: {detailError.message}</p>
+        <Link to="/events" className="mt-4 inline-block text-sm text-muted hover:text-accent">← All events</Link>
+      </main>
+    )
+  }
   if (!event) return <NotFoundPage message="We couldn't find that event. It may have been removed." />
+
+  if (event.isScraped) {
+    const originalUrl = getSafeExternalUrl(event.originalUrl)
+
+    return (
+      <main className="mx-auto max-w-6xl px-4 py-10 sm:px-6">
+        <Link to="/events" className="text-sm text-muted hover:text-accent">
+          ← All events
+        </Link>
+
+        <section className="mt-6 max-w-3xl">
+          <span className="badge bg-ink text-paper">Web-scraped</span>
+          <h1 className="display mt-5 text-4xl sm:text-6xl">{event.title}</h1>
+          <p className="mt-4 text-sm text-muted">
+            {formatDateTime(event.date)}
+            {event.location ? ` · ${event.location}` : ''}
+          </p>
+          <p className="mt-6 leading-relaxed whitespace-pre-line text-ink/80">
+            {event.description || 'See the original listing for event details.'}
+          </p>
+          {originalUrl ? (
+            <a
+              href={originalUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn btn-dark mt-8 inline-flex"
+            >
+              View details ↗
+            </a>
+          ) : (
+            <p className="mt-8 text-sm text-muted">Original event link unavailable.</p>
+          )}
+          {event.location && (
+            <section className="panel mt-10 space-y-4" aria-labelledby="event-location-heading">
+              <div>
+                <h2 id="event-location-heading" className="eyebrow">Location</h2>
+                <p className="mt-2 font-medium">{event.location}</p>
+              </div>
+              <MapEmbed query={event.location} className="h-72" />
+            </section>
+          )}
+        </section>
+      </main>
+    )
+  }
 
   const kind = getEventKind(event)
   const isSaved = bookmarks.includes(event.id)
@@ -268,6 +303,19 @@ export default function EventDetailPage() {
   function handleBookmark() {
     if (!user) return navigate('/login', { state: { from: `/events/${event.id}` } })
     toggleBookmark(event.id)
+  }
+
+  async function handleAdminCancel() {
+    if (!window.confirm(`Cancel "${event.title}"? Existing tickets and pledges will be kept.`)) return
+    setCanceling(true)
+    setAdminError('')
+    try {
+      await cancelEvent(event.id)
+      navigate('/admin/events')
+    } catch (requestError) {
+      setAdminError(requestError.message)
+      setCanceling(false)
+    }
   }
 
   return (
@@ -278,6 +326,11 @@ export default function EventDetailPage() {
 
       <div className="mt-6 grid gap-10 lg:grid-cols-[1fr_360px]">
         <section>
+          {event.status === 'cancelled' && (
+            <p role="status" className="mb-5 rounded-sm bg-peach/50 p-3 text-sm text-accent">
+              This event has been cancelled.
+            </p>
+          )}
           <div className="flex flex-wrap items-center gap-2">
             <span className="badge bg-ink text-paper">{KIND_LABELS[kind]}</span>
             <span className="badge">{event.category}</span>
@@ -315,10 +368,37 @@ export default function EventDetailPage() {
         </section>
 
         <aside className="space-y-3 self-start lg:sticky lg:top-24">
-          {kind === 'fundraiser' ? <PledgePanel event={event} /> : <TicketPanel event={event} />}
-          <button type="button" className="btn btn-outline w-full" onClick={handleBookmark}>
-            {isSaved ? '★ Saved to dashboard' : '☆ Save for later'}
-          </button>
+          {event.status === 'cancelled' ? (
+            <div className="panel text-sm text-muted">Registration and pledges are closed for this event.</div>
+          ) : (
+            <>
+              {kind === 'fundraiser' ? <PledgePanel event={event} /> : <TicketPanel event={event} />}
+              <button type="button" className="btn btn-outline w-full" onClick={handleBookmark}>
+                {isSaved ? '★ Saved to dashboard' : '☆ Save for later'}
+              </button>
+            </>
+          )}
+          {user?.role === 'admin' && (
+            <section className="panel space-y-3" aria-label="Administrator controls">
+              <p className="eyebrow">Admin controls</p>
+              {event.status !== 'cancelled' && (
+                <Link to={`/events/${event.id}/edit`} className="btn btn-dark block w-full text-center">
+                  Edit event
+                </Link>
+              )}
+              {event.status !== 'cancelled' && (
+                <button
+                  type="button"
+                  className="btn btn-outline w-full text-accent"
+                  disabled={canceling}
+                  onClick={handleAdminCancel}
+                >
+                  {canceling ? 'Cancelling…' : 'Cancel event'}
+                </button>
+              )}
+              {adminError && <p role="alert" className="text-sm text-accent">{adminError}</p>}
+            </section>
+          )}
         </aside>
       </div>
     </main>

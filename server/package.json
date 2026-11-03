@@ -4,7 +4,9 @@
   "type": "module",
   "scripts": {
     "dev": "nodemon src/index.js",
-    "start": "node src/index.js"
+    "start": "node src/index.js",
+    "admin:promote": "node scripts/promote-admin.js",
+    "db:migrate-ticket-attendees": "node scripts/migrate-ticket-attendees.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
