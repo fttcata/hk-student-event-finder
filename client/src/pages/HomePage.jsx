@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
 import ApiStatus from '../components/ApiStatus.jsx'
 import EventCard from '../components/EventCard.jsx'
+import { EventGridSkeleton } from '../components/LoadingSkeleton.jsx'
 import { useEvents } from '../hooks/useEvents.js'
 import { byDate } from '../utils/format.js'
 
@@ -11,7 +12,7 @@ const STEPS = [
 ]
 
 export default function HomePage() {
-  const { events, source } = useEvents()
+  const { events, source, loading } = useEvents()
 
   const sorted = [...events].sort(byDate)
   const upcoming = sorted.filter((event) => new Date(event.date) >= new Date())
@@ -46,11 +47,15 @@ export default function HomePage() {
           </div>
           <ApiStatus source={source} />
         </div>
-        <div className="grid gap-4 md:grid-cols-3">
-          {featured.map((event) => (
-            <EventCard key={event.id} event={event} />
-          ))}
-        </div>
+        {loading ? (
+          <EventGridSkeleton className="md:grid-cols-3" />
+        ) : (
+          <div className="grid gap-4 md:grid-cols-3">
+            {featured.map((event) => (
+              <EventCard key={event.id} event={event} />
+            ))}
+          </div>
+        )}
       </section>
 
       <section className="mx-auto max-w-6xl border-t border-line px-4 py-14 sm:px-6">

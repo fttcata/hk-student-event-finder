@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { apiGet } from '../api/client.js'
 import { fetchMyTickets } from '../api/events.js'
+import { ChatListSkeleton } from './LoadingSkeleton.jsx'
 import { useActivity } from '../context/ActivityContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { useNow } from '../hooks/useNow.js'
@@ -162,11 +163,11 @@ export default function FloatingEventChat() {
   }
 
   return (
-    <div className="fixed bottom-5 right-5 z-50 sm:bottom-6 sm:right-6">
+    <div className="fixed bottom-4 right-3 z-50 sm:bottom-6 sm:right-6">
       {isOpen && (
         <section
           aria-label="Event chat"
-          className="absolute bottom-16 right-0 flex h-[min(34rem,calc(100dvh-7rem))] w-[min(24rem,calc(100vw-2rem))] flex-col overflow-hidden rounded-lg border border-line bg-paper shadow-2xl"
+          className="absolute bottom-16 right-0 flex h-[min(34rem,calc(100dvh-6rem))] w-[min(24rem,calc(100vw-1.5rem))] flex-col overflow-hidden rounded-lg border border-line bg-paper shadow-2xl"
         >
           <header className="flex items-center gap-3 border-b border-line bg-white/80 px-4 py-3">
             {selectedRoom ? (
@@ -204,7 +205,7 @@ export default function FloatingEventChat() {
           {!selectedRoom ? (
             <div className="min-h-0 flex-1 overflow-y-auto p-3">
               <p className="px-2 pb-3 pt-1 text-xs text-muted">Chats for events you’ve joined</p>
-              {loadingRooms && <p className="px-2 py-4 text-sm text-muted">Loading your event chats…</p>}
+              {loadingRooms && <ChatListSkeleton />}
               {roomError && <p role="alert" className="px-2 py-3 text-sm text-accent">{roomError}</p>}
               {!loadingRooms && rooms.length === 0 && !roomError && (
                 <div className="rounded-sm border border-dashed border-line p-5 text-center">

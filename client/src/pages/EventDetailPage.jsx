@@ -289,7 +289,7 @@ export default function EventDetailPage() {
                 <h2 id="event-location-heading" className="eyebrow">Location</h2>
                 <p className="mt-2 font-medium">{event.location}</p>
               </div>
-              <MapEmbed query={event.location} className="h-72" />
+              <MapEmbed query={event.location} className="h-56 sm:h-72" />
             </section>
           )}
         </section>
@@ -362,7 +362,7 @@ export default function EventDetailPage() {
               <h2 id="event-location-heading" className="eyebrow">Location</h2>
               <p className="mt-2 font-medium">{event.location}</p>
             </div>
-            <MapEmbed query={event.location} className="h-72" />
+            <MapEmbed query={event.location} className="h-56 sm:h-72" />
             <EventChatRoom event={event} />
           </section>
         </section>
