@@ -5,12 +5,13 @@ const USER_COLUMNS = 'id, name, email, role, student_id, university, is_verified
 
 // Returns the new user's id. A taken email rejects with ER_DUP_ENTRY.
 export async function insertStudent({ name, email, passwordHash, studentId, university, verificationCode }) {
-  const [result] = await pool.query(
+  const [rows] = await pool.query(
     `INSERT INTO users (name, email, password_hash, role, student_id, university, is_verified, verification_code)
-     VALUES (?, ?, ?, 'student', ?, ?, FALSE, ?)`,
+     VALUES (?, ?, ?, 'student', ?, ?, FALSE, ?)
+     RETURNING id`,
     [name, email, passwordHash, studentId, university, verificationCode],
   )
-  return result.insertId
+  return rows[0].id
 }
 
 export async function findUserById(userId) {
