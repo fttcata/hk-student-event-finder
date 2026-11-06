@@ -464,6 +464,8 @@ router.post('/', requireAuth, async (request, response) => {
         userId: request.user.id,
         purchasedBy: request.user.id,
         eventId,
+        attendeeName: request.user.name,
+        attendeeEmail: request.user.email,
         type: 'free',
         ticketCode,
         amountPaid: 0,
