@@ -1,7 +1,8 @@
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api'
+const API_TIMEOUT_MS = 10000
 
 export async function apiGet(path) {
-  const response = await fetch(`${API_BASE_URL}${path}`, { headers: authHeaders() })
+  const response = await fetchWithTimeout(`${API_BASE_URL}${path}`, { headers: authHeaders() })
   if (!response.ok) throw await requestError(response)
   return response.json()
 }
@@ -19,7 +20,7 @@ export async function apiDelete(path) {
 }
 
 async function apiRequest(path, method, body) {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await fetchWithTimeout(`${API_BASE_URL}${path}`, {
     method,
     headers: body === undefined ? authHeaders() : { ...authHeaders(), 'Content-Type': 'application/json' },
     ...(body !== undefined && { body: JSON.stringify(body) }),
@@ -29,6 +30,12 @@ async function apiRequest(path, method, body) {
     throw new Error(data.error || `Request failed with status ${response.status}`)
   }
   return data
+}
+
+function fetchWithTimeout(url, options) {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), API_TIMEOUT_MS)
+  return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timeout))
 }
 
 async function requestError(response) {
