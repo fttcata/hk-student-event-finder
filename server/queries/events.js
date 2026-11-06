@@ -43,9 +43,9 @@ function buildEventFilters({ source, search, categoryId, eventType, price, avail
 
   if (search) {
     const pattern = `%${escapeLike(search)}%`
-    conditions.push(`(e.title LIKE ? ESCAPE '\\\\'
-      OR e.description LIKE ? ESCAPE '\\\\'
-      OR e.location LIKE ? ESCAPE '\\\\')`)
+    conditions.push(`(e.title LIKE ? ESCAPE '\\'
+      OR e.description LIKE ? ESCAPE '\\'
+      OR e.location LIKE ? ESCAPE '\\')`)
     params.push(pattern, pattern, pattern)
   }
   if (categoryId !== undefined) {
@@ -134,14 +134,23 @@ export async function releaseSeat(connection, eventId) {
   ])
 }
 
-// `values` is keyed by column name; SET ? expands it (mysql2 escapes every value).
 export async function insertEvent(connection, values) {
-  const [result] = await connection.query('INSERT INTO events SET ?', [values])
-  return result.insertId
+  const columns = Object.keys(values)
+  const placeholders = columns.map(() => '?').join(', ')
+  const [rows] = await connection.query(
+    `INSERT INTO events (${columns.join(', ')}) VALUES (${placeholders}) RETURNING id`,
+    columns.map((column) => values[column]),
+  )
+  return rows[0].id
 }
 
 export async function updateEvent(connection, eventId, values) {
-  await connection.query('UPDATE events SET ? WHERE id = ?', [values, eventId])
+  const columns = Object.keys(values)
+  const assignments = columns.map((column) => `${column} = ?`).join(', ')
+  await connection.query(
+    `UPDATE events SET ${assignments}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+    [...columns.map((column) => values[column]), eventId],
+  )
 }
 
 export async function cancelEvent(connection, eventId) {
@@ -151,14 +160,23 @@ export async function cancelEvent(connection, eventId) {
 // Inserts a scraped event, or refreshes the row uq_events_source finds. Setting status here
 // brings back an event that a previous scrape cancelled.
 export async function upsertScrapedEvent(values) {
-  const { source, source_id, organizer_id, ...changes } = values
-  await pool.query('INSERT INTO events SET ? ON DUPLICATE KEY UPDATE ?', [values, changes])
+  const columns = Object.keys(values)
+  const placeholders = columns.map(() => '?').join(', ')
+  const updates = columns
+    .filter((column) => !['source', 'source_id'].includes(column))
+    .map((column) => `${column} = EXCLUDED.${column}`)
+    .join(', ')
+  await pool.query(
+    `INSERT INTO events (${columns.join(', ')}) VALUES (${placeholders})
+     ON CONFLICT (source, source_id) DO UPDATE SET ${updates}, updated_at = CURRENT_TIMESTAMP`,
+    columns.map((column) => values[column]),
+  )
 }
 
 // Events that have not ended but are gone from the website were taken down by their organizer.
 export async function cancelMissingScrapedEvents(source, listedIds) {
   const [result] = await pool.query(
-    `UPDATE events SET status = 'cancelled'
+    `UPDATE events SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP
      WHERE source = ? AND status = 'published' AND source_id NOT IN (?)
        AND COALESCE(end_date, event_date) >= NOW()`,
     [source, listedIds],
