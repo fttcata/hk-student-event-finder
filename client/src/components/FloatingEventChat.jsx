@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { apiGet } from '../api/client.js'
 import { fetchMyTickets } from '../api/events.js'
 import { useActivity } from '../context/ActivityContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
+import { useEventChat } from '../hooks/useEventChat.js'
 import { useNow } from '../hooks/useNow.js'
 import { formatDateTime, getChatStatus } from '../utils/format.js'
 
@@ -65,8 +65,6 @@ export default function FloatingEventChat() {
   const [isOpen, setIsOpen] = useState(false)
   const [selectedRoomId, setSelectedRoomId] = useState(null)
   const [ticketResult, setTicketResult] = useState({ ownerKey: '', tickets: [], error: '' })
-  const [messageResult, setMessageResult] = useState({ roomId: null, messages: [], error: '' })
-  const [demoMessages, setDemoMessages] = useState({})
   const [messageText, setMessageText] = useState('')
   const ownerKey = user ? String(user.id ?? user.email) : ''
 
@@ -99,66 +97,29 @@ export default function FloatingEventChat() {
   const loadingRooms = Boolean(ownerKey && token && !currentTicketResult)
   const rooms = buildRooms(tickets, bookings, now)
   const selectedRoom = rooms.find((room) => room.id === selectedRoomId) ?? null
-  const chatRoomId = selectedRoom?.id
-  const chatRoomState = selectedRoom?.chat.state
-  const messageResultForRoom = messageResult.roomId === chatRoomId ? messageResult : null
-  const remoteMessages = messageResultForRoom?.messages ?? []
-  const conversationError = messageResultForRoom?.error ?? ''
-  const loadingMessages = Boolean(
-    isOpen && chatRoomId && chatRoomState === 'open' && /^\d+$/.test(chatRoomId) && !messageResultForRoom,
-  )
-  const visibleMessages = [
-    ...remoteMessages,
-    ...(selectedRoom ? demoMessages[selectedRoom.id] ?? [] : []),
-  ]
-
-  useEffect(() => {
-    if (!isOpen || !chatRoomId || chatRoomState !== 'open' || !/^\d+$/.test(chatRoomId)) return undefined
-
-    let active = true
-
-    async function loadMessages() {
-      try {
-        const data = await apiGet(`/events/${encodeURIComponent(chatRoomId)}/messages`)
-        if (active) setMessageResult({ roomId: chatRoomId, messages: data.messages ?? [], error: '' })
-      } catch (error) {
-        if (active) {
-          setMessageResult((current) => ({
-            roomId: chatRoomId,
-            messages: current.roomId === chatRoomId ? current.messages : [],
-            error: `Unable to load messages: ${error.message}`,
-          }))
-        }
-      }
-    }
-
-    loadMessages()
-    const timer = window.setInterval(loadMessages, 5000)
-    return () => {
-      active = false
-      window.clearInterval(timer)
-    }
-  }, [isOpen, chatRoomId, chatRoomState])
+  const chatOpen = isOpen && selectedRoom?.chat.state === 'open'
+  const {
+    messages,
+    loading: loadingMessages,
+    error: conversationError,
+    canChat,
+    sending,
+    sendMessage: sendChatMessage,
+  } = useEventChat(selectedRoom?.id, { enabled: chatOpen })
 
   if (!user || !token) return null
 
-  function sendMessage(formEvent) {
+  async function sendMessage(formEvent) {
     formEvent.preventDefault()
     const content = messageText.trim()
-    if (!selectedRoom || selectedRoom.chat.state !== 'open' || !content) return
+    if (!selectedRoom || selectedRoom.chat.state !== 'open' || !content || sending) return
 
-    const message = {
-      id: `demo-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      content,
-      user_name: user.name || 'You',
-      created_at: new Date().toISOString(),
-      is_demo: true,
+    try {
+      const message = await sendChatMessage(content)
+      if (message) setMessageText('')
+    } catch {
+      return
     }
-    setDemoMessages((current) => ({
-      ...current,
-      [selectedRoom.id]: [...(current[selectedRoom.id] ?? []), message],
-    }))
-    setMessageText('')
   }
 
   return (
@@ -262,44 +223,63 @@ export default function FloatingEventChat() {
                 {selectedRoom.chat.state === 'closed' && (
                   <p className="rounded-sm bg-ink/5 p-3 text-center text-sm text-muted">This event chat is closed.</p>
                 )}
-                {loadingMessages && <p className="text-center text-xs text-muted">Loading messages…</p>}
+                {loadingMessages && messages.length === 0 && (
+                  <p className="text-center text-xs text-muted">Loading messages…</p>
+                )}
                 {conversationError && <p role="alert" className="rounded-sm bg-accent/10 p-2 text-xs text-accent">{conversationError}</p>}
-                {!loadingMessages && visibleMessages.length === 0 && selectedRoom.chat.state === 'open' && (
+                {!loadingMessages && messages.length === 0 && selectedRoom.chat.state === 'open' && !conversationError && (
                   <p className="pt-8 text-center text-sm text-muted">No messages yet. Say hello to the group.</p>
                 )}
-                {visibleMessages.map((message) => (
-                  <div
-                    key={message.id}
-                    className={`max-w-[88%] rounded-lg px-3 py-2 text-sm ${
-                      message.is_demo ? 'ml-auto bg-ink text-paper' : 'mr-auto bg-white'
-                    }`}
-                  >
-                    {!message.is_demo && <p className="mb-1 text-xs font-semibold text-teal">{message.user_name || 'Student'}</p>}
-                    <p className="whitespace-pre-wrap break-words">{message.content}</p>
-                    {message.is_demo && <p className="mt-1 text-[10px] text-paper/70">Demo message · only visible here</p>}
-                  </div>
-                ))}
+                {messages.map((message) => {
+                  const isOwn = message.user_id === user.id
+                  return (
+                    <div
+                      key={message.id}
+                      className={`max-w-[88%] rounded-lg px-3 py-2 text-sm ${
+                        isOwn ? 'ml-auto bg-ink text-paper' : 'mr-auto bg-white'
+                      }`}
+                    >
+                      <p className={`mb-1 text-xs font-semibold ${isOwn ? 'text-paper/70' : 'text-teal'}`}>
+                        {isOwn ? 'You' : message.user_name || 'Student'}
+                      </p>
+                      <p className="whitespace-pre-wrap break-words">{message.content}</p>
+                    </div>
+                  )
+                })}
               </div>
 
               {selectedRoom.chat.state === 'open' ? (
-                <form onSubmit={sendMessage} className="border-t border-line bg-white/80 p-3">
-                  <label className="sr-only" htmlFor="event-chat-message">Write a message</label>
-                  <div className="flex items-end gap-2">
-                    <textarea
-                      id="event-chat-message"
-                      className="input max-h-24 min-h-11 resize-y"
-                      rows={1}
-                      maxLength={1000}
-                      placeholder="Message this event group…"
-                      value={messageText}
-                      onChange={(event) => setMessageText(event.target.value)}
-                    />
-                    <button type="submit" className="btn btn-accent shrink-0 px-3 py-2.5" disabled={!messageText.trim()}>
-                      Send
-                    </button>
+                canChat ? (
+                  <form onSubmit={sendMessage} className="border-t border-line bg-white/80 p-3">
+                    <label className="sr-only" htmlFor="event-chat-message">Write a message</label>
+                    <div className="flex items-end gap-2">
+                      <textarea
+                        id="event-chat-message"
+                        className="input max-h-24 min-h-11 resize-y"
+                        rows={1}
+                        maxLength={1000}
+                        placeholder="Message this event group…"
+                        value={messageText}
+                        onChange={(event) => setMessageText(event.target.value)}
+                        disabled={sending}
+                      />
+                      <button
+                        type="submit"
+                        className="btn btn-accent shrink-0 px-3 py-2.5"
+                        disabled={!messageText.trim() || sending}
+                      >
+                        {sending ? 'Sending…' : 'Send'}
+                      </button>
+                    </div>
+                    <p className="mt-2 text-[10px] text-muted">
+                      Messages are visible to this event’s ticket holders and donors.
+                    </p>
+                  </form>
+                ) : (
+                  <div className="border-t border-line bg-white/80 p-4 text-center text-xs text-muted">
+                    {loadingMessages || !conversationError ? 'Connecting to chat…' : 'Messaging is unavailable.'}
                   </div>
-                  <p className="mt-2 text-[10px] text-muted">Demo messages are only visible in this browser session.</p>
-                </form>
+                )
               ) : (
                 <div className="border-t border-line bg-white/80 p-4 text-center text-xs text-muted">
                   Messaging is unavailable while this room is {selectedRoom.chat.state}.
