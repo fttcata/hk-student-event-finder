@@ -57,7 +57,7 @@ export async function fetchAllEvents() {
   }
 }
 
-// GET /api/events → the backend API. Filters map 1:1 to the backend query params
+// GET /api/events → MySQL. Filters map 1:1 to the backend query params
 // (search, category_id, event_type, availability, price, page, limit).
 // Falls back to demo data so the UI is still usable without the backend.
 export async function fetchEvents(filters = {}) {
