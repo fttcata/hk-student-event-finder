@@ -4,8 +4,8 @@ Modern Tech on WWW group project. (COMP3322)
 ## Stack
 
 - `client/`: React 19, Vite, Tailwind CSS, React Router
-- `server/`: Node.js, Express, `pg`, standard parameterized SQL
-- `database/`: PostgreSQL initialization and seed data (compatible with Supabase)
+- `server/`: Node.js, Express, `mysql2`, standard parameterized SQL
+- `database/`: MySQL 8 initialization and seed data
 
 ## Run locally
 
@@ -15,18 +15,7 @@ Requirements: Node.js 20+ and Docker Desktop.
 docker compose up -d
 ```
 
-Open `http://localhost`. The client container serves the React SPA on port 80 and proxies `/api` to the Express container on port 5000. The API is also available on host port 5001, and PostgreSQL on host port 5432.
-
-### Supabase
-
-Create a Supabase project, open the SQL Editor, and run [`database/init.sql`](database/init.sql).
-Set `DATABASE_URL` in `server/.env` to the project's connection string (the pooler connection
-string is recommended), and set `DB_SSL=true`. The application uses its existing Express
-authentication while Supabase provides PostgreSQL as the database.
-
-The initialization script does not add demo data. If the project was initialized before the
-demo seed was removed, run [`database/remove-mock-data.sql`](database/remove-mock-data.sql) once
-in the Supabase SQL Editor.
+Open `http://localhost`. The client container serves the React SPA on port 80 and proxies `/api` to the Express container on port 5000. The API is also available on host port 5001, and MySQL on host port 3307, to avoid common local port conflicts.
 
 For local development without Docker:
 
@@ -57,10 +46,10 @@ npm run admin:promote -- your-verified-account@example.com
 ```
 
 For Docker-based development, run the command on the host from the `server` directory after
-dependencies are installed, using the local PostgreSQL connection:
+dependencies are installed, using host port 3307 for the Compose database:
 
 ```sh
-DATABASE_URL=postgresql://app_user:app_password@127.0.0.1:5432/student_events npm run admin:promote -- your-verified-account@example.com
+DB_HOST=127.0.0.1 DB_PORT=3307 npm run admin:promote -- your-verified-account@example.com
 ```
 
 Log out and sign in again after promotion. Admins can manage published
@@ -74,10 +63,10 @@ Email receipts: set `SMTP_USER` / `SMTP_PASSWORD` in `server/.env` to your Mailt
 
 Ticket checkout collects a name and email address for each attendee. Each ticket is stored with its
 attendee details and its own reference code, and confirmation is sent to that attendee when SMTP is
-configured. After updating an existing database, run this migration once from the repository root:
+configured. After updating an existing MySQL volume, run this migration once from the repository root:
 
 ```sh
-DATABASE_URL=postgresql://app_user:app_password@127.0.0.1:5432/student_events \
+DB_HOST=127.0.0.1 DB_PORT=3307 DB_NAME=student_events DB_USER=app_user DB_PASSWORD=app_password \
   npm run db:migrate-ticket-attendees --prefix server
 ```
 

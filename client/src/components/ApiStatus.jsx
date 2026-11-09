@@ -1,7 +1,7 @@
-// Shows whether events came from the live PostgreSQL API or the demo fallback.
+// Shows whether events came from the live MySQL API or the demo fallback.
 const STATUS = {
   loading: { dot: 'bg-muted', text: 'Checking API…' },
-  api: { dot: 'bg-leaf', text: 'Live data · API connected' },
+  api: { dot: 'bg-leaf', text: 'Live data · MySQL API connected' },
   demo: { dot: 'bg-accent', text: 'API offline · showing demo events' },
 }
 
