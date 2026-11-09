@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import ApiStatus from '../components/ApiStatus.jsx'
 import EventCard from '../components/EventCard.jsx'
+import { EventGridSkeleton } from '../components/LoadingSkeleton.jsx'
 import { useEvents } from '../hooks/useEvents.js'
 import { byDate, getEventKind } from '../utils/format.js'
 import { UNIVERSITIES } from '../utils/universities.js'
@@ -100,7 +101,11 @@ export default function EventsPage() {
         {loading ? 'Loading events…' : `Showing ${filtered.length} of ${events.length} events`}
       </p>
 
-      {!loading && filtered.length === 0 ? (
+      {loading ? (
+        <div className="mt-4">
+          <EventGridSkeleton />
+        </div>
+      ) : filtered.length === 0 ? (
         <div className="panel mt-4 text-center">
           <p className="text-muted">No events match those filters.</p>
           <button type="button" className="btn btn-outline mt-4" onClick={() => setSearchParams({})}>
