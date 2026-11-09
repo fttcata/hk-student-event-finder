@@ -1,5 +1,6 @@
-import { createContext, useContext, useEffect } from 'react'
+import { createContext, useContext, useEffect, useState } from 'react'
 import { usePersistentState } from '../hooks/usePersistentState.js'
+import { apiGet } from '../api/client.js'
 import { loginUser, registerUser, verifyUser } from '../api/auth.js'
 import { validatePassword, validateStudentEmail } from '../utils/validation.js'
 
@@ -9,6 +10,7 @@ const AuthContext = createContext(null)
 export function AuthProvider({ children }) {
   const [user, setUser] = usePersistentState('campushub:user', null)
   const [token, setToken] = usePersistentState('campushub:token', '')
+  const [authLoading, setAuthLoading] = useState(Boolean(token))
 
   useEffect(() => {
     function handleSessionExpired() {
@@ -18,6 +20,36 @@ export function AuthProvider({ children }) {
     window.addEventListener('campushub:session-expired', handleSessionExpired)
     return () => window.removeEventListener('campushub:session-expired', handleSessionExpired)
   }, [setToken, setUser])
+
+  useEffect(() => {
+    if (!token) {
+      setAuthLoading(false)
+      return undefined
+    }
+
+    let active = true
+    setAuthLoading(true)
+    apiGet('/auth/me')
+      .then(({ user: currentUser }) => {
+        if (active) setUser(currentUser)
+      })
+      .catch((error) => {
+        if (!active) return
+        if (error.status === 401) {
+          setToken('')
+          setUser(null)
+        } else {
+          console.error(`Unable to refresh the signed-in user: ${error.message}`)
+        }
+      })
+      .finally(() => {
+        if (active) setAuthLoading(false)
+      })
+
+    return () => {
+      active = false
+    }
+  }, [setToken, setUser, token])
 
   async function register({ name, email, password }) {
     const error = (!name.trim() && 'Name is required.') || validateStudentEmail(email) || validatePassword(password)
@@ -48,7 +80,7 @@ export function AuthProvider({ children }) {
     setUser(null)
   }
 
-  return <AuthContext.Provider value={{ user, token, register, login, verify, logout }}>{children}</AuthContext.Provider>
+  return <AuthContext.Provider value={{ user, token, authLoading, register, login, verify, logout }}>{children}</AuthContext.Provider>
 }
 
 export function useAuth() {

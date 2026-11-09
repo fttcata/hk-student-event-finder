@@ -6,17 +6,17 @@
   --font-sans: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
   --font-mono: 'DM Mono', ui-monospace, monospace;
 
-  --color-paper: #f3f0e7;
-  --color-ink: #1c2925;
-  --color-muted: #66716b;
-  --color-line: #cfd3c5;
-  --color-accent: #eb5e3f;
-  --color-sage: #e7e9d8;
-  --color-sage-dark: #a8bd8e;
-  --color-peach: #f6c8a8;
-  --color-mist: #c9d7d2;
-  --color-teal: #51766d;
-  --color-leaf: #67a065;
+  --color-paper: #fffaf0;
+  --color-ink: #722f37;
+  --color-muted: #806b6d;
+  --color-line: #e4d3d0;
+  --color-accent: #8db9e8;
+  --color-sage: #edf5fd;
+  --color-sage-dark: #b7d2ee;
+  --color-peach: #f4dfe2;
+  --color-mist: #dceafa;
+  --color-teal: #6f9bc9;
+  --color-leaf: #81b5a0;
 }
 
 @layer base {
@@ -40,7 +40,7 @@
     @apply bg-ink text-paper hover:bg-ink/85;
   }
   .btn-accent {
-    @apply bg-accent text-white hover:bg-accent/85;
+    @apply bg-accent text-ink hover:bg-accent/85;
   }
   .btn-outline {
     @apply border border-ink/20 hover:border-ink;

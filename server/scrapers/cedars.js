@@ -158,8 +158,12 @@ function keepNewestDuplicates(events) {
   return [...newest.values()]
 }
 
-// Returns the events worth showing, plus listedIds: every event the website still lists, including
-// pages that failed to load this time, so a temporary error does not look like a removed event.
+function isCurrentOrFutureEvent(eventDate, now) {
+  return eventDate >= now
+}
+
+// Returns current/future events, plus listedIds for accepted events and pages that failed to load
+// so a temporary error does not look like a removed event.
 export async function scrapeCedarsEvents(now = new Date()) {
   const listed = await fetchListedEvents(now)
   if (listed.length === 0) throw new Error('The website listed no events, so its format has probably changed')
@@ -171,7 +175,7 @@ export async function scrapeCedarsEvents(now = new Date()) {
       const response = await request(item.detail_url)
       const page = parseEventPage(await response.text())
       if (!page) throw new Error('no date found on the page')
-      if (page.endsAt >= now) {
+      if (isCurrentOrFutureEvent(page.startsAt, now)) {
         parsed.push({
           ...page,
           sourceId: item.id,
@@ -195,7 +199,7 @@ export async function scrapeCedarsEvents(now = new Date()) {
   const events = keepNewestDuplicates(parsed)
   const duplicateIds = new Set(parsed.map((event) => event.sourceId))
   for (const event of events) duplicateIds.delete(event.sourceId)
-  const listedIds = listed.map((item) => item.id).filter((id) => !duplicateIds.has(id))
+  const listedIds = [...parsed.map((event) => event.sourceId), ...failedIds].filter((id) => !duplicateIds.has(id))
 
   return { events, listedIds, failedCount: failedIds.length }
 }

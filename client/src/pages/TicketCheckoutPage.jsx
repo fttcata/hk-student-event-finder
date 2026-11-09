@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { bookEventTickets, fetchEvent } from '../api/events.js'
 import Field from '../components/Field.jsx'
-import { CheckoutSkeleton } from '../components/LoadingSkeleton.jsx'
 import { useActivity } from '../context/ActivityContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { useEvents } from '../hooks/useEvents.js'
@@ -40,9 +39,9 @@ function CheckoutProgress({ currentStep }) {
             <li
               key={key}
               aria-current={active ? 'step' : undefined}
-              className={`flex items-center gap-1.5 text-xs sm:gap-2 sm:text-sm ${active ? 'font-semibold text-ink' : 'text-muted'}`}
+              className={`text-xs sm:text-sm ${active ? 'font-semibold text-ink' : 'text-muted'}`}
             >
-              <span className={`inline-grid size-6 shrink-0 place-items-center rounded-full text-xs ${
+              <span className={`mr-2 inline-grid size-6 place-items-center rounded-full text-xs ${
                 active || complete ? 'bg-ink text-paper' : 'border border-line'
               }`}>
                 {complete ? '✓' : index + 1}
@@ -104,7 +103,7 @@ function CheckoutFlow({ id }) {
   }, [id, loading, listedEvent])
 
   if (isLoadingEvent) {
-    return <CheckoutSkeleton />
+    return <main className="mx-auto max-w-3xl px-4 py-16 text-muted sm:px-6">Loading checkout…</main>
   }
   if (loadError || !event) {
     return (
@@ -121,7 +120,7 @@ function CheckoutFlow({ id }) {
   if (event.isScraped) {
     return (
       <main className="mx-auto max-w-3xl px-4 py-16 sm:px-6">
-        <p className="text-muted">Tickets for web-scraped events must be booked on the original event website.</p>
+        <p className="text-muted">Tickets for CEDARS events must be booked on the original event website.</p>
         <Link to={`/events/${id}`} className="mt-4 inline-block text-sm text-muted hover:text-accent">
           ← Back to event
         </Link>
@@ -181,7 +180,7 @@ function CheckoutFlow({ id }) {
   }
 
   return (
-    <main className="mx-auto max-w-3xl px-4 py-8 sm:px-6 sm:py-12">
+    <main className="mx-auto max-w-3xl px-4 py-12 sm:px-6">
       <Link to={`/events/${event.id}`} className="text-sm text-muted hover:text-accent">
         ← Back to event
       </Link>
@@ -195,7 +194,7 @@ function CheckoutFlow({ id }) {
         </p>
       </header>
 
-      <section className="panel mt-6 p-4 sm:mt-8 sm:p-6">
+      <section className="panel mt-8">
         <CheckoutProgress currentStep={step} />
 
         {step === 'attendees' && (

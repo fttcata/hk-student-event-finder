@@ -16,7 +16,6 @@ const EMPTY_FORM = {
   description: '',
   category: 'Social',
   date: '',
-  deadline: '',
   location: '',
   capacity: '50',
   price: '0',
@@ -30,7 +29,6 @@ function toForm(event) {
     description: event.description,
     category: event.category,
     date: toDateTimeInput(event.date),
-    deadline: toDateTimeInput(event.deadline),
     location: event.location,
     capacity: String(event.capacity),
     price: String(event.price),
@@ -60,6 +58,7 @@ function EventForm({ existing, persisted = false }) {
     setErrors(nextErrors)
     if (Object.keys(nextErrors).length > 0) return
 
+    const eventStart = new Date(form.date)
     const eventData = {
       ...(existing && { id: existing.id }),
       type: form.type,
@@ -67,7 +66,7 @@ function EventForm({ existing, persisted = false }) {
       description: form.description.trim(),
       category: isFundraiser ? 'Charity' : form.category,
       date: new Date(form.date).toISOString(),
-      deadline: new Date(form.deadline).toISOString(),
+      deadline: new Date(eventStart.getTime() - 2 * 60 * 60 * 1000).toISOString(),
       location: form.location.trim(),
       capacity: isFundraiser ? 0 : Number(form.capacity),
       price: isFundraiser ? 0 : Number(form.price),
@@ -148,7 +147,7 @@ function EventForm({ existing, persisted = false }) {
           />
         </Field>
 
-        <div className="grid gap-6 sm:grid-cols-2">
+        <div>
           <Field label="Starts" htmlFor="date" error={errors.date}>
             <input
               id="date"
@@ -156,16 +155,6 @@ function EventForm({ existing, persisted = false }) {
               type="datetime-local"
               className={inputClass('date')}
               value={form.date}
-              onChange={handleChange}
-            />
-          </Field>
-          <Field label={isFundraiser ? 'Campaign ends' : 'Registration deadline'} htmlFor="deadline" error={errors.deadline}>
-            <input
-              id="deadline"
-              name="deadline"
-              type="datetime-local"
-              className={inputClass('deadline')}
-              value={form.deadline}
               onChange={handleChange}
             />
           </Field>

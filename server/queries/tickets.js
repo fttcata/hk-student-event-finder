@@ -17,11 +17,15 @@ export async function lockTicketsForUsers(connection, eventId, userIds) {
 }
 
 // user_id holds the ticket and attends; purchased_by paid for it.
-export async function insertTicket(connection, { userId, purchasedBy, eventId, type, ticketCode, amountPaid }) {
+export async function insertTicket(
+  connection,
+  { userId, purchasedBy, eventId, attendeeName, attendeeEmail, type, ticketCode, amountPaid },
+) {
   await connection.query(
-    `INSERT INTO tickets (user_id, purchased_by, event_id, type, status, ticket_code, amount_paid)
-     VALUES (?, ?, ?, ?, 'confirmed', ?, ?)`,
-    [userId, purchasedBy, eventId, type, ticketCode, amountPaid],
+    `INSERT INTO tickets (
+       user_id, purchased_by, event_id, attendee_name, attendee_email, type, status, ticket_code, amount_paid
+     ) VALUES (?, ?, ?, ?, ?, ?, 'confirmed', ?, ?)`,
+    [userId, purchasedBy, eventId, attendeeName, attendeeEmail, type, ticketCode, amountPaid],
   )
 }
 
