@@ -299,7 +299,7 @@ function normalizeEventType(value) {
 }
 
 // Shared by POST and PUT: validates an event payload and returns { error } or { values },
-// where values is keyed by events column name for the event query helpers.
+// where values is keyed by events column name, ready for INSERT ... SET ? / UPDATE ... SET ?.
 async function parseEventInput(body, { allowPastDate = false } = {}) {
   const eventType = normalizeEventType(body.event_type ?? body.type)
 
@@ -743,7 +743,6 @@ router.post('/:id/tickets', requireAuth, rejectExternalEvent, async (request, re
       return { status: 409, body: { error: 'This event has already started' } }
     }
 
-    const emails = normalizedAttendees.map((attendee) => attendee.email)
     const attendeeRows = await findUsersByEmails(connection, emails)
     const attendeeByEmail = new Map(attendeeRows.map((row) => [row.email.toLowerCase(), row]))
     const unknown = emails.filter((email) => !attendeeByEmail.has(email))
@@ -789,16 +788,8 @@ router.post('/:id/tickets', requireAuth, rejectExternalEvent, async (request, re
     await reserveSeats(connection, eventId, seats)
 
     const type = event.price > 0 ? 'paid' : 'free'
-    const attendeeDetails = new Map(normalizedAttendees.map((attendee) => [attendee.email, attendee]))
+    const fields = { purchasedBy: request.user.id, type, amountPaid: event.price }
     for (const attendee of attendees) {
-      const details = attendeeDetails.get(attendee.email.toLowerCase())
-      const fields = {
-        purchasedBy: request.user.id,
-        attendeeName: details.name,
-        attendeeEmail: details.email,
-        type,
-        amountPaid: event.price,
-      }
       const existing = existingByUser.get(attendee.id)
       const ticketCode = await withFreshTicketCode((code) =>
         existing

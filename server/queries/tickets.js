@@ -17,28 +17,20 @@ export async function lockTicketsForUsers(connection, eventId, userIds) {
 }
 
 // user_id holds the ticket and attends; purchased_by paid for it.
-export async function insertTicket(
-  connection,
-  { userId, purchasedBy, eventId, attendeeName, attendeeEmail, type, ticketCode, amountPaid },
-) {
+export async function insertTicket(connection, { userId, purchasedBy, eventId, type, ticketCode, amountPaid }) {
   await connection.query(
-    `INSERT INTO tickets
-       (user_id, purchased_by, event_id, attendee_name, attendee_email, type, status, ticket_code, amount_paid)
-     VALUES (?, ?, ?, ?, ?, ?, 'confirmed', ?, ?)`,
-    [userId, purchasedBy, eventId, attendeeName, attendeeEmail, type, ticketCode, amountPaid],
+    `INSERT INTO tickets (user_id, purchased_by, event_id, type, status, ticket_code, amount_paid)
+     VALUES (?, ?, ?, ?, 'confirmed', ?, ?)`,
+    [userId, purchasedBy, eventId, type, ticketCode, amountPaid],
   )
 }
 
 // A cancelled ticket keeps its row (UNIQUE user+event), so rebooking confirms it again.
-export async function reconfirmTicket(
-  connection,
-  ticketId,
-  { purchasedBy, attendeeName, attendeeEmail, type, ticketCode, amountPaid },
-) {
+export async function reconfirmTicket(connection, ticketId, { purchasedBy, type, ticketCode, amountPaid }) {
   await connection.query(
-    `UPDATE tickets SET purchased_by = ?, attendee_name = ?, attendee_email = ?, type = ?, status = 'confirmed',
+    `UPDATE tickets SET purchased_by = ?, type = ?, status = 'confirmed',
        ticket_code = ?, amount_paid = ? WHERE id = ?`,
-    [purchasedBy, attendeeName, attendeeEmail, type, ticketCode, amountPaid, ticketId],
+    [purchasedBy, type, ticketCode, amountPaid, ticketId],
   )
 }
 
@@ -61,7 +53,7 @@ export async function listTicketsByCodes(ticketCodes) {
 
 export async function listTicketRowsForUser(userId) {
   const [rows] = await pool.query(
-    `SELECT t.id, t.ticket_code, t.type, t.status, t.amount_paid, t.attendee_name, t.attendee_email, t.created_at,
+    `SELECT t.id, t.ticket_code, t.type, t.status, t.amount_paid, t.created_at,
             e.id AS event_id, e.title, e.event_date, e.location, e.address, e.image_url,
             e.event_type, e.status AS event_status, e.price, c.name AS category
      FROM tickets t
