@@ -6,6 +6,7 @@ import assert from 'node:assert/strict'
 import crypto from 'node:crypto'
 import { after, before, describe, test } from 'node:test'
 import pg from 'pg'
+import { io as createSocketClient } from 'socket.io-client'
 
 const { Client, types } = pg
 
@@ -13,6 +14,7 @@ const { Client, types } = pg
 types.setTypeParser(20, Number.parseInt)
 
 const API = process.env.TEST_API_URL || 'http://localhost:5000/api'
+const API_ORIGIN = new URL(API).origin
 const DATABASE_URL =
   process.env.TEST_DATABASE_URL ||
   'postgresql://app_user:app_password@127.0.0.1:5432/student_events'
@@ -36,6 +38,69 @@ async function getMessages(eventId, token) {
   const headers = token ? { Authorization: `Bearer ${token}` } : {}
   const response = await fetch(`${API}/events/${eventId}/messages`, { headers })
   return { status: response.status, body: await response.json() }
+}
+
+async function postMessage(eventId, token, content) {
+  const headers = token
+    ? { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
+    : { 'Content-Type': 'application/json' }
+  const response = await fetch(`${API}/events/${eventId}/messages`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ content }),
+  })
+  return { status: response.status, body: await response.json() }
+}
+
+function connectSocket(token) {
+  return new Promise((resolve, reject) => {
+    const socket = createSocketClient(API_ORIGIN, {
+      path: '/socket.io',
+      auth: { token },
+      transports: ['websocket'],
+      reconnection: false,
+      forceNew: true,
+      timeout: 5000,
+    })
+    const timer = setTimeout(() => {
+      socket.disconnect()
+      reject(new Error('Socket connection timed out'))
+    }, 5000)
+
+    socket.once('connect', () => {
+      clearTimeout(timer)
+      resolve(socket)
+    })
+    socket.once('connect_error', (error) => {
+      clearTimeout(timer)
+      socket.close()
+      reject(error)
+    })
+  })
+}
+
+function joinEvent(socket, eventId) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('Chat join timed out')), 5000)
+    socket.emit('chat:join', { eventId }, (result) => {
+      clearTimeout(timer)
+      resolve(result)
+    })
+  })
+}
+
+function nextChatMessage(socket) {
+  return new Promise((resolve, reject) => {
+    function handleMessage(payload) {
+      clearTimeout(timer)
+      resolve(payload)
+    }
+    const timer = setTimeout(() => {
+      socket.off('chat:message', handleMessage)
+      reject(new Error('Timed out waiting for a chat message'))
+    }, 5000)
+    socket.once('chat:message', handleMessage)
+  })
 }
 
 async function register(label, { verified = true } = {}) {
@@ -268,5 +333,101 @@ describe('GET /api/events/:id/messages', () => {
         await db.query("UPDATE events SET status = 'published' WHERE id = $1", [eventId])
       }
     })
+  })
+})
+
+describe('POST /api/events/:id/messages', () => {
+  test('creates a message, returns its author, and persists it', async () => {
+    const content = `posted-${RUN}`
+    const { status, body } = await postMessage(eventId, users.holder.token, content)
+    assert.equal(status, 201)
+    assert.deepEqual(Object.keys(body.message).sort(), ['content', 'created_at', 'id', 'user_id', 'user_name'])
+    assert.equal(body.message.content, content)
+    assert.equal(body.message.user_id, users.holder.id)
+    assert.equal(body.message.user_name, users.holder.name)
+    assert.match(body.message.created_at, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/)
+
+    const listed = await getMessages(eventId, users.holder.token)
+    assert.ok(listed.body.messages.some((message) => message.id === body.message.id))
+  })
+
+  test('trims surrounding whitespace', async () => {
+    const { status, body } = await postMessage(eventId, users.holder.token, '  hello there  ')
+    assert.equal(status, 201)
+    assert.equal(body.message.content, 'hello there')
+  })
+
+  test('rejects empty, whitespace-only, non-string, and oversized messages', async () => {
+    for (const content of ['', '   ', 42, null, 'x'.repeat(1001)]) {
+      const { status, body } = await postMessage(eventId, users.holder.token, content)
+      assert.equal(status, 400)
+      assert.match(body.error, /between 1 and 1000/)
+    }
+  })
+
+  test('requires authentication and event membership', async () => {
+    assert.equal((await postMessage(eventId, '', 'hello')).status, 401)
+    assert.equal((await postMessage(eventId, users.donor.token, 'hello')).status, 403)
+    assert.equal((await postMessage(eventId, users.unverified.token, 'hello')).status, 403)
+  })
+})
+
+describe('Socket.IO event chat', () => {
+  test('an authenticated member joins and receives a newly posted message', async () => {
+    const socket = await connectSocket(users.holder.token)
+    try {
+      assert.deepEqual(await joinEvent(socket, eventId), { ok: true })
+
+      const incoming = nextChatMessage(socket)
+      const { status, body } = await postMessage(eventId, users.organizer.token, `live-${RUN}`)
+      assert.equal(status, 201)
+
+      const payload = await incoming
+      assert.equal(payload.event_id, eventId)
+      assert.equal(payload.message.id, body.message.id)
+      assert.equal(payload.message.content, `live-${RUN}`)
+    } finally {
+      socket.disconnect()
+    }
+  })
+
+  test('rejects a socket handshake without a valid token', async () => {
+    await assert.rejects(connectSocket('not-a-jwt'), /Invalid or expired token/)
+    await assert.rejects(connectSocket(''), /Authentication required/)
+  })
+
+  test('denies chat:join to a user without an event ticket', async () => {
+    const socket = await connectSocket(users.donor.token)
+    try {
+      const result = await joinEvent(socket, eventId)
+      assert.equal(result.ok, false)
+      assert.equal(result.status, 403)
+      assert.match(result.error, /ticket holders and donors/)
+    } finally {
+      socket.disconnect()
+    }
+  })
+
+  test('does not deliver room messages to a socket that did not join', async () => {
+    const holderSocket = await connectSocket(users.holder.token)
+    const outsiderSocket = await connectSocket(users.outsider.token)
+    try {
+      assert.deepEqual(await joinEvent(holderSocket, eventId), { ok: true })
+
+      let outsiderReceived = false
+      outsiderSocket.on('chat:message', () => {
+        outsiderReceived = true
+      })
+
+      const incoming = nextChatMessage(holderSocket)
+      await postMessage(eventId, users.holder.token, `room-only-${RUN}`)
+      await incoming
+      await new Promise((resolve) => setTimeout(resolve, 100))
+
+      assert.equal(outsiderReceived, false)
+    } finally {
+      holderSocket.disconnect()
+      outsiderSocket.disconnect()
+    }
   })
 })
