@@ -724,7 +724,7 @@ router.post('/:id/tickets', requireAuth, rejectExternalEvent, async (request, re
     normalizedAttendees.push({ name, email })
   }
 
-  const ticketIds = []
+  const ticketCodes = []
   const earlyResponse = await withTransaction(async (connection) => {
     const event = await lockEventForBooking(connection, eventId)
     if (!event) return { status: 404, body: EVENT_NOT_FOUND }
@@ -784,7 +784,6 @@ router.post('/:id/tickets', requireAuth, rejectExternalEvent, async (request, re
         status: 409,
         body: { error: `Not enough seats left (${event.available_tickets} available)` },
       }
-      if (!inserted) throw new Error('Could not generate a unique ticket reference')
     }
     await reserveSeats(connection, eventId, seats)
 
