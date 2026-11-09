@@ -16,6 +16,13 @@ const STEPS = [
 
 const MAX_TICKETS_PER_ORDER = 4
 
+function validateCardDetails(card) {
+  if (!/^\d{16}$/.test(card.number)) return 'Card number must contain exactly 16 digits.'
+  if (!/^(0[1-9]|1[0-2])\/\d{2}$/.test(card.expiry)) return 'Expiry date must use MM/YY format.'
+  if (!/^\d{3}$/.test(card.cvc)) return 'CVV must contain exactly 3 digits.'
+  return ''
+}
+
 function CheckoutProgress({ currentStep }) {
   const activeIndex = STEPS.findIndex(([key]) => key === currentStep)
   const progress = (activeIndex / (STEPS.length - 1)) * 100
@@ -140,8 +147,15 @@ function CheckoutFlow({ id }) {
 
   async function completeCheckout(formEvent) {
     formEvent.preventDefault()
-    setSaving(true)
     setError('')
+    if (isPaid) {
+      const cardError = validateCardDetails(card)
+      if (cardError) {
+        setError(cardError)
+        return
+      }
+    }
+    setSaving(true)
     try {
       if (isApiEvent) {
         const booking = await bookEventTickets(event.id, { attendees })
@@ -257,10 +271,12 @@ function CheckoutFlow({ id }) {
                       autoComplete="off"
                       inputMode="numeric"
                       className="input"
-                      placeholder="Any number for this demo"
+                      maxLength={16}
+                      pattern="\d{16}"
+                      placeholder="16 digits"
                       required
                       value={card.number}
-                      onChange={(e) => setCard({ ...card, number: e.target.value })}
+                      onChange={(e) => setCard({ ...card, number: e.target.value.replace(/\D/g, '').slice(0, 16) })}
                     />
                   </Field>
                   <div className="grid grid-cols-2 gap-3">
@@ -270,9 +286,14 @@ function CheckoutFlow({ id }) {
                         autoComplete="off"
                         className="input"
                         placeholder="MM/YY"
+                        maxLength={5}
+                        pattern="(0[1-9]|1[0-2])\/\d{2}"
                         required
                         value={card.expiry}
-                        onChange={(e) => setCard({ ...card, expiry: e.target.value })}
+                        onChange={(e) => {
+                          const value = e.target.value.replace(/\D/g, '').slice(0, 4)
+                          setCard({ ...card, expiry: value.length > 2 ? `${value.slice(0, 2)}/${value.slice(2)}` : value })
+                        }}
                       />
                     </Field>
                     <Field label="CVC" htmlFor="card-cvc">
@@ -281,10 +302,12 @@ function CheckoutFlow({ id }) {
                         autoComplete="off"
                         inputMode="numeric"
                         className="input"
-                        placeholder="CVC"
+                        maxLength={3}
+                        pattern="\d{3}"
+                        placeholder="3 digits"
                         required
                         value={card.cvc}
-                        onChange={(e) => setCard({ ...card, cvc: e.target.value })}
+                        onChange={(e) => setCard({ ...card, cvc: e.target.value.replace(/\D/g, '').slice(0, 3) })}
                       />
                     </Field>
                   </div>

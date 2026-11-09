@@ -43,8 +43,11 @@ export default function RegisterPage() {
     setSubmitting(true)
     setSubmitError('')
     try {
-      await register(form)
-      navigate(location.state?.from ?? '/events', { replace: true })
+      const response = await register(form)
+      navigate('/verify', {
+        replace: true,
+        state: { email: form.email.trim(), emailSent: response.verification_email_sent },
+      })
     } catch (err) {
       setSubmitError(err.message)
       setSubmitting(false)

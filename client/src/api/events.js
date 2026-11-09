@@ -19,6 +19,7 @@ export function normalizeEvent(raw) {
       raw.event_type === 'web_scraped' ||
       raw.type === 'web_scraped' ||
       raw.type === 'scraped',
+    isExternal: raw.is_external === true || raw.source != null,
     originalUrl: raw.original_url ?? raw.source_url ?? raw.originalUrl ?? raw.sourceUrl ?? '',
     date: raw.date,
     deadline: raw.registration_deadline ?? raw.deadline ?? raw.date,
@@ -37,6 +38,22 @@ export function normalizeEvent(raw) {
     organizerEmail: raw.organizer?.email ?? raw.organizerEmail ?? null,
     organizerId: raw.organizer?.id ?? raw.organizer_id ?? null,
     status: raw.status ?? 'published',
+  }
+
+}
+
+export async function fetchAllEvents() {
+  try {
+    const [appResponse, externalResponse] = await Promise.all([
+      apiGet('/events?source=app'),
+      apiGet('/events?source=external'),
+    ])
+    return {
+      events: [...appResponse.events, ...externalResponse.events].map(normalizeEvent),
+      source: 'api',
+    }
+  } catch {
+    return { events: demoEvents.map(normalizeEvent), source: 'demo' }
   }
 }
 

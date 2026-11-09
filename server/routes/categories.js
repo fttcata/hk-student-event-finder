@@ -1,10 +1,10 @@
 import { Router } from 'express'
-import { pool } from '../config/db.js'
+import { listCategories } from '../queries/categories.js'
 
 const router = Router()
 
 router.get('/', async (_request, response) => {
-  const [categories] = await pool.query('SELECT id, name FROM categories ORDER BY name ASC')
+  const categories = await listCategories()
   response.status(200).json({ categories })
 })
 
