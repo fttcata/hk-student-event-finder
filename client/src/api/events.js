@@ -19,6 +19,7 @@ export function normalizeEvent(raw) {
       raw.event_type === 'web_scraped' ||
       raw.type === 'web_scraped' ||
       raw.type === 'scraped',
+    isExternal: raw.is_external === true || raw.source != null,
     originalUrl: raw.original_url ?? raw.source_url ?? raw.originalUrl ?? raw.sourceUrl ?? '',
     date: raw.date,
     deadline: raw.registration_deadline ?? raw.deadline ?? raw.date,
@@ -38,9 +39,25 @@ export function normalizeEvent(raw) {
     organizerId: raw.organizer?.id ?? raw.organizer_id ?? null,
     status: raw.status ?? 'published',
   }
+
 }
 
-// GET /api/events → MySQL. Filters map 1:1 to the backend query params
+export async function fetchAllEvents() {
+  try {
+    const [appResponse, externalResponse] = await Promise.all([
+      apiGet('/events?source=app'),
+      apiGet('/events?source=external'),
+    ])
+    return {
+      events: [...appResponse.events, ...externalResponse.events].map(normalizeEvent),
+      source: 'api',
+    }
+  } catch {
+    return { events: demoEvents.map(normalizeEvent), source: 'demo' }
+  }
+}
+
+// GET /api/events → the backend API. Filters map 1:1 to the backend query params
 // (search, category_id, event_type, availability, price, page, limit).
 // Falls back to demo data so the UI is still usable without the backend.
 export async function fetchEvents(filters = {}) {

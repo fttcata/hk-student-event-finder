@@ -7,6 +7,15 @@ const smtpConfigured = Boolean(
 
 const FROM = process.env.SMTP_FROM || process.env.SMTP_USER
 
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;')
+}
+
 export const transporter = smtpConfigured
   ? nodemailer.createTransport({
       host: process.env.SMTP_HOST,
@@ -36,6 +45,19 @@ export async function reportSmtpStatus() {
   } catch (error) {
     console.warn(`SMTP check failed, email receipts will be logged as failed: ${error.message}`)
   }
+}
+
+export async function sendVerificationEmail({ name, email, code }) {
+  if (!transporter) throw new Error('SMTP is not configured')
+  const safeName = escapeHtml(name)
+  const safeCode = escapeHtml(code)
+  return transporter.sendMail({
+    from: FROM,
+    to: email,
+    subject: 'Verify your Campus Hub account',
+    html: `<div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;color:#202020"><h1>Verify your Campus Hub account</h1><p>Hi ${safeName},</p><p>Use this verification code to activate your account:</p><p style="font-size:24px;font-weight:bold;letter-spacing:3px">${safeCode}</p><p>This code can only be used once.</p></div>`,
+    text: [`Hi ${name},`, '', 'Use this verification code to activate your Campus Hub account:', code, '', 'This code can only be used once.'].join('\n'),
+  })
 }
 
 // Throws when SMTP is not configured or the send fails; callers record the outcome in email_log.

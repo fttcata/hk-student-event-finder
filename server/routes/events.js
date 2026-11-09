@@ -299,7 +299,7 @@ function normalizeEventType(value) {
 }
 
 // Shared by POST and PUT: validates an event payload and returns { error } or { values },
-// where values is keyed by events column name, ready for INSERT ... SET ? / UPDATE ... SET ?.
+// where values is keyed by events column name for the event query helpers.
 async function parseEventInput(body, { allowPastDate = false } = {}) {
   const eventType = normalizeEventType(body.event_type ?? body.type)
 
@@ -464,6 +464,8 @@ router.post('/', requireAuth, async (request, response) => {
         userId: request.user.id,
         purchasedBy: request.user.id,
         eventId,
+        attendeeName: request.user.name,
+        attendeeEmail: request.user.email,
         type: 'free',
         ticketCode,
         amountPaid: 0,
@@ -683,6 +685,11 @@ async function sendBookingEmails({ buyer, event, tickets }) {
       logEmail(ticket.user_id, 'booking', ticket.ticket_code, ticketResults[index].status === 'fulfilled'),
     ),
   )
+  return tickets.map((ticket, index) => ({
+    reference_code: ticket.ticket_code,
+    email: ticket.attendee.email,
+    sent: ticketResults[index].status === 'fulfilled',
+  }))
 }
 
 // Protected, verified students only (HANDOFF.md §1). Each attendee gets their own ticket row and
@@ -736,6 +743,7 @@ router.post('/:id/tickets', requireAuth, rejectExternalEvent, async (request, re
       return { status: 409, body: { error: 'This event has already started' } }
     }
 
+    const emails = normalizedAttendees.map((attendee) => attendee.email)
     const attendeeRows = await findUsersByEmails(connection, emails)
     const attendeeByEmail = new Map(attendeeRows.map((row) => [row.email.toLowerCase(), row]))
     const unknown = emails.filter((email) => !attendeeByEmail.has(email))
@@ -781,8 +789,16 @@ router.post('/:id/tickets', requireAuth, rejectExternalEvent, async (request, re
     await reserveSeats(connection, eventId, seats)
 
     const type = event.price > 0 ? 'paid' : 'free'
-    const fields = { purchasedBy: request.user.id, type, amountPaid: event.price }
+    const attendeeDetails = new Map(normalizedAttendees.map((attendee) => [attendee.email, attendee]))
     for (const attendee of attendees) {
+      const details = attendeeDetails.get(attendee.email.toLowerCase())
+      const fields = {
+        purchasedBy: request.user.id,
+        attendeeName: details.name,
+        attendeeEmail: details.email,
+        type,
+        amountPaid: event.price,
+      }
       const existing = existingByUser.get(attendee.id)
       const ticketCode = await withFreshTicketCode((code) =>
         existing
@@ -815,15 +831,19 @@ router.post('/:id/tickets', requireAuth, rejectExternalEvent, async (request, re
   // Re-fetched after commit, so available_tickets reflects this booking.
   const event = await selectEventById(eventId, request.user)
 
-  // Fire-and-forget: the endpoint returns once the booking is durable, while Nodemailer and the
-  // email_log inserts continue in the background.
-  setImmediate(() => {
-    sendBookingEmails({ buyer: request.user, event, tickets }).catch((error) => {
-      console.error(`Booking emails for ${tickets.map((ticket) => ticket.ticket_code).join(', ')} failed: ${error.message}`)
-    })
-  })
+  let receiptEmails
+  try {
+    receiptEmails = await sendBookingEmails({ buyer: request.user, event, tickets })
+  } catch (error) {
+    console.error(`Booking emails for ${tickets.map((ticket) => ticket.ticket_code).join(', ')} failed: ${error.message}`)
+    receiptEmails = tickets.map((ticket) => ({
+      reference_code: ticket.ticket_code,
+      email: ticket.attendee.email,
+      sent: false,
+    }))
+  }
 
-  return response.status(201).json({ tickets, ticket: tickets[0], event, email_queued: true })
+  return response.status(201).json({ tickets, ticket: tickets[0], event, receipt_emails: receiptEmails })
 })
 
 // Protected. Cancelling releases the seat and restores the stored counter; the row stays as a

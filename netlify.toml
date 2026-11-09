@@ -1,0 +1,3 @@
+[build]
+  command = "npm install --include=optional && npm --workspace client run build"
+  publish = "client/dist"

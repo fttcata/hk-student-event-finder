@@ -13,6 +13,7 @@ import LoginPage from './pages/LoginPage.jsx'
 import NotFoundPage from './pages/NotFoundPage.jsx'
 import Profile from './pages/Profile.jsx'
 import RegisterPage from './pages/RegisterPage.jsx'
+import VerifyPage from './pages/VerifyPage.jsx'
 
 // Every URL in the SPA and which page it renders. Protected pages require login.
 export default function App() {
@@ -42,6 +43,7 @@ export default function App() {
             <Route path="/events/:id" element={<EventDetailPage />} />
             <Route path="/login" element={<LoginPage />} />
             <Route path="/register" element={<RegisterPage />} />
+            <Route path="/verify" element={<VerifyPage />} />
             <Route
               path="/profile"
               element={

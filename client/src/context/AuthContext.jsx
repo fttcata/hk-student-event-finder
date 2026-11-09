@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect } from 'react'
 import { usePersistentState } from '../hooks/usePersistentState.js'
-import { loginUser, registerUser } from '../api/auth.js'
+import { loginUser, registerUser, verifyUser } from '../api/auth.js'
 import { validatePassword, validateStudentEmail } from '../utils/validation.js'
 
 const AuthContext = createContext(null)
@@ -26,6 +26,7 @@ export function AuthProvider({ children }) {
     const response = await registerUser({ name: name.trim(), email: email.trim(), password })
     setToken(response.token)
     setUser(response.user)
+    return response
   }
 
   async function login({ email, password }) {
@@ -37,12 +38,17 @@ export function AuthProvider({ children }) {
     setUser(response.user)
   }
 
+  async function verify({ email, code }) {
+    await verifyUser({ email: email.trim(), code: code.trim() })
+    setUser((current) => (current ? { ...current, is_verified: true } : current))
+  }
+
   function logout() {
     setToken('')
     setUser(null)
   }
 
-  return <AuthContext.Provider value={{ user, token, register, login, logout }}>{children}</AuthContext.Provider>
+  return <AuthContext.Provider value={{ user, token, register, login, verify, logout }}>{children}</AuthContext.Provider>
 }
 
 export function useAuth() {
