@@ -14,7 +14,7 @@ export default function Profile() {
   return (
     <div style={{ maxWidth: '800px', margin: '2rem auto', padding: '0 1rem' }}>
       <h1>Student Profile</h1>
-      <div style={{ background: '#ffffff', padding: '1.5rem', borderRadius: '12px', boxShadow: '0 4px 12px rgba(0,0,0,0.05)' }}>
+      <div style={{ background: '#fffaf0', padding: '1.5rem', borderRadius: '12px', boxShadow: '0 4px 12px rgba(114,47,55,0.12)' }}>
         <h3>Account Information</h3>
         <p><strong>Email:</strong> {user?.email || 'N/A'}</p>
         <p><strong>User ID:</strong> {user?.id || user?.sub || 'N/A'}</p>
@@ -25,8 +25,8 @@ export default function Profile() {
           style={{
             marginTop: '1rem',
             padding: '0.6rem 1.2rem',
-            backgroundColor: '#ff3b30',
-            color: '#fff',
+            backgroundColor: '#722f37',
+            color: '#fffaf0',
             border: 'none',
             borderRadius: '8px',
             cursor: 'pointer'
@@ -37,10 +37,10 @@ export default function Profile() {
       </div>
       <section style={{ marginTop: '1.5rem' }}>
         <h2>My Tickets</h2>
-        {error && <p style={{ color: '#b42318' }}>{error}</p>}
+        {error && <p style={{ color: '#722f37' }}>{error}</p>}
         {!error && tickets.length === 0 && <p>No tickets acquired yet.</p>}
         {tickets.map((ticket) => (
-          <article key={ticket.id} style={{ background: '#fff', padding: '1rem', marginTop: '0.75rem', borderRadius: '8px' }}>
+          <article key={ticket.id} style={{ background: '#fffaf0', padding: '1rem', marginTop: '0.75rem', borderRadius: '8px' }}>
             <h3>{ticket.event.title}</h3>
             <p>{formatDateTime(ticket.event.date)} · {ticket.event.location}</p>
             <p><strong>Attendee:</strong> {ticket.attendee_name} · {ticket.attendee_email}</p>

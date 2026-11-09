@@ -29,11 +29,6 @@ export function validateEventForm(form, bookedSeats = 0) {
   if (!form.date) errors.date = 'Pick a date and time.'
   else if (new Date(form.date) <= now) errors.date = 'The event must be in the future.'
 
-  if (!form.deadline) errors.deadline = 'Pick a registration deadline.'
-  else if (form.date && new Date(form.deadline) > new Date(form.date)) {
-    errors.deadline = 'The deadline must be before the event starts.'
-  }
-
   if (form.type === 'fundraiser') {
     if (!(Number(form.goal) >= 100)) errors.goal = 'Fundraising goal must be at least HK$100.'
   } else {

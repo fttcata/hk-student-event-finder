@@ -1,12 +1,16 @@
 import crypto from 'node:crypto'
+import { spawn } from 'node:child_process'
 import { Router } from 'express'
 import { sendBookingSummary, sendDonationReceipt, sendTicketReceipt } from '../config/email.js'
-import { optionalAuth, requireAuth } from '../middleware/auth.js'
+import { optionalAuth, requireAdmin, requireAuth } from '../middleware/auth.js'
 import { findCategoryById, findCategoryByName } from '../queries/categories.js'
 import { isChatMember, listEventMessages } from '../queries/chat.js'
 import { logEmail } from '../queries/emailLog.js'
 import {
   cancelEvent,
+  cancelAllUserEvents,
+  deleteAllCedarsEvents,
+  deleteScrapedEvent,
   findEventRow,
   findEventStatus,
   insertEvent,
@@ -189,6 +193,55 @@ router.get('/', optionalAuth, async (request, response) => {
   return response.json({ events, page, limit, total })
 })
 
+router.get('/manage', requireAdmin, async (request, response) => {
+  const page = parsePositiveInt(request.query.page, DEFAULT_PAGE)
+  const limit = parsePositiveInt(request.query.limit, DEFAULT_LIMIT)
+  if (page === null || page < 1 || limit === null || limit < 1 || limit > MAX_LIMIT) {
+    return response.status(400).json({ error: `page must be positive and limit must be between 1 and ${MAX_LIMIT}` })
+  }
+
+  const { rows, total } = await listEventRows({ source: 'all' }, limit, (page - 1) * limit)
+  return response.status(200).json({
+    events: rows.map((row) => serializeEvent(row, request.user)),
+    page,
+    limit,
+    total,
+  })
+})
+
+router.post('/admin/scrape', requireAdmin, async (_request, response) => {
+  const child = spawn(process.execPath, ['scripts/scrapeCedars.js'], {
+    cwd: process.cwd(),
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+
+  let output = ''
+  let errorOutput = ''
+  child.stdout.on('data', (chunk) => { output += chunk.toString() })
+  child.stderr.on('data', (chunk) => { errorOutput += chunk.toString() })
+  child.on('error', (error) => response.status(500).json({ error: `CEDARS scrape failed: ${error.message}` }))
+  child.on('close', (code) => {
+    if (response.headersSent) return
+    if (code !== 0) return response.status(502).json({ error: errorOutput.trim() || 'CEDARS scrape failed' })
+    return response.status(200).json({ message: 'CEDARS events refreshed', output: output.trim() })
+  })
+})
+
+router.delete('/admin/user-created', requireAdmin, async (_request, response) => {
+  let cancelledUserEvents = 0
+  await withTransaction(async (connection) => {
+    cancelledUserEvents = await cancelAllUserEvents(connection)
+  })
+  return response.status(200).json({ cancelled_user_events: cancelledUserEvents })
+})
+
+router.delete('/admin/cedars', requireAdmin, async (_request, response) => {
+  await withTransaction(async (connection) => {
+    await deleteAllCedarsEvents(connection)
+  })
+  return response.status(200).json({ deleted_cedars_events: true })
+})
+
 // Non-numeric ids ('abc', '1e1', '0x2') can never match a row, so callers answer 404 rather than 400.
 function parseEventId(rawId) {
   const eventId = parsePositiveInt(rawId, null)
@@ -197,8 +250,8 @@ function parseEventId(rawId) {
 
 const EVENT_NOT_FOUND = { error: 'Event not found' }
 
-// Scraped events belong to another website, so every route that changes an event or joins it
-// stops here. Missing ids fall through to the route's own 404.
+// Scraped events belong to another website, so ordinary routes that change an event or join it
+// stop here. Administrators have a separate delete path for removing stale CEDARS rows.
 async function rejectExternalEvent(request, response, next) {
   const eventId = parseEventId(request.params.id)
   const event = eventId === null ? null : await findEventStatus(eventId)
@@ -266,7 +319,7 @@ const MIN_FUNDRAISER_GOAL = 100
 const MAX_FUNDRAISER_GOAL = 10000000
 const MAX_CAPACITY = 100000
 const MAX_DESCRIPTION_LENGTH = 5000
-const REGISTRATION_CLOSES_BEFORE_MS = 24 * 60 * 60 * 1000
+const REGISTRATION_CLOSES_BEFORE_MS = 2 * 60 * 60 * 1000
 
 const DECIMAL_PATTERN = /^-?\d+(\.\d+)?$/
 
@@ -407,7 +460,7 @@ async function parseEventInput(body, { allowPastDate = false } = {}) {
       latitude: latitude.value,
       longitude: longitude.value,
       event_date: startsAt,
-      // registration_deadline is computed, never taken from the client: exactly 24h before the start.
+      // registration_deadline is computed, never taken from the client: exactly 2h before the start.
       registration_deadline: new Date(startsAt.getTime() - REGISTRATION_CLOSES_BEFORE_MS),
       event_type: eventType,
       capacity,
@@ -556,17 +609,31 @@ router.put('/:id', requireAuth, rejectExternalEvent, async (request, response) =
 
 // Protected, organizer only. Tickets and pledges are receipts (FK ON DELETE RESTRICT), so the
 // event is cancelled rather than removed: it drops out of GET /api/events but stays readable by id.
-router.delete('/:id', requireAuth, rejectExternalEvent, async (request, response) => {
+router.delete('/:id', requireAuth, async (request, response) => {
   let eventId
+  let scrapedDeleted = false
   const earlyResponse = await withTransaction(async (connection) => {
     const { row, status, error } = await findOwnedEvent(connection, request.params.id, request.user)
     if (error) return { status, body: { error } }
+
+    if (row.source) {
+      if (request.user.role !== 'admin') {
+        return { status: 403, body: { error: 'Only administrators can delete CEDARS events' } }
+      }
+      await deleteScrapedEvent(connection, row.id)
+      eventId = row.id
+      scrapedDeleted = true
+      return null
+    }
 
     await cancelEvent(connection, row.id)
     eventId = row.id
   })
   if (earlyResponse) return response.status(earlyResponse.status).json(earlyResponse.body)
 
+  if (scrapedDeleted) {
+    return response.status(200).json({ id: eventId, deleted: true })
+  }
   const event = await selectEventById(eventId, request.user)
   return response.status(200).json({ event })
 })
@@ -736,7 +803,8 @@ router.post('/:id/tickets', requireAuth, rejectExternalEvent, async (request, re
     }
 
     const now = new Date()
-    if (event.registration_deadline != null && event.registration_deadline <= now) {
+    const registrationDeadline = new Date(event.event_date.getTime() - REGISTRATION_CLOSES_BEFORE_MS)
+    if (registrationDeadline <= now) {
       return { status: 409, body: { error: 'Registration for this event has closed' } }
     }
     if (event.event_date <= now) {
@@ -794,7 +862,14 @@ router.post('/:id/tickets', requireAuth, rejectExternalEvent, async (request, re
       const ticketCode = await withFreshTicketCode((code) =>
         existing
           ? reconfirmTicket(connection, existing.id, { ...fields, ticketCode: code })
-          : insertTicket(connection, { ...fields, userId: attendee.id, eventId, ticketCode: code }),
+          : insertTicket(connection, {
+              ...fields,
+              userId: attendee.id,
+              eventId,
+              attendeeName: attendee.name,
+              attendeeEmail: attendee.email,
+              ticketCode: code,
+            }),
       )
       ticketCodes.push(ticketCode)
     }

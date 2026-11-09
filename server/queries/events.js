@@ -37,7 +37,7 @@ function buildEventFilters({ source, search, categoryId, eventType, price, avail
   // Scraped events have their own section and only appear there until they end.
   if (source === 'external') {
     conditions.push('e.source IS NOT NULL', 'COALESCE(e.end_date, e.event_date) >= NOW()')
-  } else {
+  } else if (source === 'app') {
     conditions.push('e.source IS NULL')
   }
 
@@ -146,6 +146,19 @@ export async function updateEvent(connection, eventId, values) {
 
 export async function cancelEvent(connection, eventId) {
   await connection.query(`UPDATE events SET status = 'cancelled' WHERE id = ?`, [eventId])
+}
+
+export async function deleteScrapedEvent(connection, eventId) {
+  await connection.query(`DELETE FROM events WHERE id = ? AND source IS NOT NULL`, [eventId])
+}
+
+export async function deleteAllCedarsEvents(connection) {
+  await connection.query(`DELETE FROM events WHERE source IS NOT NULL AND status = 'published'`)
+}
+
+export async function cancelAllUserEvents(connection) {
+  const [result] = await connection.query(`UPDATE events SET status = 'cancelled' WHERE source IS NULL AND status = 'published'`)
+  return result.affectedRows
 }
 
 // Inserts a scraped event, or refreshes the row uq_events_source finds. Setting status here

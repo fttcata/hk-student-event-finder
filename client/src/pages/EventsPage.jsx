@@ -1,6 +1,5 @@
 import { useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import ApiStatus from '../components/ApiStatus.jsx'
 import EventCard from '../components/EventCard.jsx'
 import { EventGridSkeleton } from '../components/LoadingSkeleton.jsx'
 import { useEvents } from '../hooks/useEvents.js'
@@ -9,14 +8,14 @@ import { UNIVERSITIES } from '../utils/universities.js'
 
 const KIND_FILTERS = [
   ['all', 'All'],
-  ['scraped', 'Web-scraped'],
+  ['scraped', 'CEDARS'],
   ['free', 'Free'],
   ['paid', 'Paid'],
   ['fundraiser', 'Fundraisers'],
 ]
 
 export default function EventsPage() {
-  const { events, source, loading } = useEvents()
+  const { events, loading } = useEvents()
 
   // Filters live in the URL (?q=run&type=paid) so a filtered list can be shared or bookmarked.
   const [searchParams, setSearchParams] = useSearchParams()
@@ -55,7 +54,6 @@ export default function EventsPage() {
           <p className="eyebrow">Directory</p>
           <h1 className="display mt-4 text-5xl md:text-6xl">All events</h1>
         </div>
-        <ApiStatus source={source} />
       </div>
 
       <div className="mt-10 flex flex-col gap-3 md:flex-row">

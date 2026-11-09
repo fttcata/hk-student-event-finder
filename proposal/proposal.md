@@ -30,7 +30,7 @@ Map View: Interactive pin markers highlight event locations across Hong Kong cam
 Filter Controls: Students toggle between event types: Free Events, Paid Events, or Fundraiser Events.
 
 Step 3: Viewing Details & Taking Action
-Clicking on an event card opens the Event Detail Page, displaying venue location details, an interactive map snippet, total capacity counters, and a live registration countdown timer (showing remaining time until registration closes 24 hours prior to start).
+Clicking on an event card opens the Event Detail Page, displaying venue location details, an interactive map snippet, total capacity counters, and a live registration countdown timer (showing remaining time until registration closes 2 hours prior to start).
 Standard Events (Free or Paid): The student clicks "Claim Free Ticket" or "Buy Ticket". For paid events, a mock checkout modal opens to handle payment details. Upon confirmation, the application instantly updates the remaining ticket counter and dispatches an automated email confirmation receipt containing event details and a unique ticket verification code directly to the student's inbox.
 Fundraiser Events: The page highlights the organizer's cause statement (e.g., "Running a marathon for mental health awareness"), target financial goal, and a dynamic progress bar showing current funds raised. Supporters click "Donate / Support" to submit a monetary pledge, immediately updating the progress bar and sending a donation email receipt.
 

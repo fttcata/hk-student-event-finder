@@ -18,7 +18,8 @@ export function normalizeEvent(raw) {
       raw.sourceType === 'web_scraped' ||
       raw.event_type === 'web_scraped' ||
       raw.type === 'web_scraped' ||
-      raw.type === 'scraped',
+      raw.type === 'scraped' ||
+      raw.source != null,
     isExternal: raw.is_external === true || raw.source != null,
     originalUrl: raw.original_url ?? raw.source_url ?? raw.originalUrl ?? raw.sourceUrl ?? '',
     date: raw.date,
@@ -125,6 +126,22 @@ export async function updateEvent(id, event) {
 export async function cancelEvent(id) {
   const data = await apiDelete(`/events/${encodeURIComponent(id)}`)
   return normalizeEvent(data.event)
+}
+
+export async function deleteEvent(id) {
+  return apiDelete(`/events/${encodeURIComponent(id)}`)
+}
+
+export async function refreshCedarsEvents() {
+  return apiPost('/events/admin/scrape', {})
+}
+
+export async function cancelAllUserEvents() {
+  return apiDelete('/events/admin/user-created')
+}
+
+export async function deleteAllCedarsEvents() {
+  return apiDelete('/events/admin/cedars')
 }
 
 export async function bookEventTickets(id, { attendees }) {
