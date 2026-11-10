@@ -3,7 +3,6 @@ import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import MapEmbed from '../components/MapEmbed.jsx'
 import ProgressBar from '../components/ProgressBar.jsx'
 import Receipt from '../components/Receipt.jsx'
-import CountdownTimer from '../components/CountdownTimer.jsx'
 import TicketCounter from '../components/TicketCounter.jsx'
 import EventChatRoom from '../components/EventChatRoom.jsx'
 import FundraiserDonateModal from '../components/FundraiserDonateModal.jsx'
@@ -15,7 +14,6 @@ import { useNow } from '../hooks/useNow.js'
 import {
   formatDateTime,
   formatMoney,
-  formatTimeLeft,
   getEventKind,
   getSafeExternalUrl,
   KIND_LABELS,
@@ -34,11 +32,14 @@ function LoginPrompt({ action }) {
   )
 }
 
-function Deadline({ deadline, now }) {
-  const msLeft = new Date(deadline) - now
+const REGISTRATION_CLOSES_BEFORE_MS = 2 * 60 * 60 * 1000
+
+function RegistrationWindow({ event }) {
+  const registrationDeadline = new Date(new Date(event.date).getTime() - REGISTRATION_CLOSES_BEFORE_MS)
   return (
-    <p className="font-mono text-xs text-muted">
-      {msLeft > 0 ? `Registration closes in ${formatTimeLeft(msLeft)}` : 'Registration closed'}
+    <p className="text-xs text-muted">
+      Event registration closes 2 hours before {formatDateTime(event.date)}.
+      {registrationDeadline <= new Date() ? ' The booking window has closed.' : ''}
     </p>
   )
 }
@@ -53,7 +54,7 @@ function TicketPanel({ event }) {
   const hasLimit = event.capacity > 0
   const seatsLeft = hasLimit ? event.capacity - event.booked : Infinity
   const isFull = seatsLeft <= 0
-  const isClosed = new Date(event.deadline) <= now
+  const isClosed = new Date(event.date).getTime() - REGISTRATION_CLOSES_BEFORE_MS <= now
   const isPaid = event.price > 0
   const total = event.price * quantity
 
@@ -77,8 +78,7 @@ function TicketPanel({ event }) {
           </p>
         </div>
       )}
-      <Deadline deadline={event.deadline} now={now} />
-      <CountdownTimer target={event.deadline} />
+      <RegistrationWindow event={event} />
 
       {isFull || isClosed ? (
         <button type="button" className="btn btn-dark w-full" disabled>
@@ -115,7 +115,7 @@ function PledgePanel({ event }) {
   const [error, setError] = useState('')
   const [donateOpen, setDonateOpen] = useState(false)
 
-  const isClosed = new Date(event.deadline) <= now
+  const isClosed = new Date(event.date).getTime() - REGISTRATION_CLOSES_BEFORE_MS <= now
   const percent = event.goal > 0 ? Math.round((event.raised / event.goal) * 100) : 0
 
   function handleSubmit(e) {
@@ -159,7 +159,7 @@ function PledgePanel({ event }) {
       </div>
       <ProgressBar value={event.raised} max={event.goal} barClassName="bg-teal" />
       {user && !isClosed && <button type="button" className="btn btn-accent w-full" onClick={() => setDonateOpen(true)}>Open donation checkout</button>}
-      <Deadline deadline={event.deadline} now={now} />
+      <RegistrationWindow event={event} />
 
       {isClosed ? (
         <button type="button" className="btn btn-dark w-full" disabled>
@@ -262,7 +262,7 @@ export default function EventDetailPage() {
         </Link>
 
         <section className="mt-6 max-w-3xl">
-          <span className="badge bg-ink text-paper">Web-scraped</span>
+          <span className="badge bg-ink text-paper">CEDARS</span>
           <h1 className="display mt-5 text-4xl sm:text-6xl">{event.title}</h1>
           <p className="mt-4 text-sm text-muted">
             {formatDateTime(event.date)}
@@ -289,7 +289,7 @@ export default function EventDetailPage() {
                 <h2 id="event-location-heading" className="eyebrow">Location</h2>
                 <p className="mt-2 font-medium">{event.location}</p>
               </div>
-              <MapEmbed query={event.location} className="h-72" />
+              <MapEmbed query={event.location} className="h-56 sm:h-72" />
             </section>
           )}
         </section>
@@ -362,8 +362,8 @@ export default function EventDetailPage() {
               <h2 id="event-location-heading" className="eyebrow">Location</h2>
               <p className="mt-2 font-medium">{event.location}</p>
             </div>
-            <MapEmbed query={event.location} className="h-72" />
-            <EventChatRoom key={event.id} event={event} />
+            <MapEmbed query={event.location} className="h-56 sm:h-72" />
+            <EventChatRoom event={event} />
           </section>
         </section>
 

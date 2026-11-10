@@ -196,7 +196,7 @@ Post '/events' fundraiser.json $token 201 'fundraiser'      # fundraiser_goal 50
 Post '/events' bad-category.json $token 400 "category 'Arts' is offered by the client but not seeded"
 Post '/events' bad-goal.json $token 400 'fundraiser goal below HK$100'
 
-# registration_deadline is computed: exactly 24h before the start (UTC), organizer = token user
+# registration_deadline is computed: exactly 2h before the start (UTC), organizer = token user
 docker compose exec mysql mysql -uroot -proot_password student_events -e "SELECT id,event_type,organizer_id,event_date,registration_deadline,capacity,price,goal_amount FROM events WHERE organizer_id=(SELECT id FROM users WHERE email='eventtest@connect.hku.hk');"
 
 # the new events are immediately visible through the public endpoints
@@ -209,7 +209,7 @@ docker compose exec mysql mysql -uroot -proot_password student_events -e "DELETE
 
 Expected: `401`/`401`/`403`, three `201`s, two `400`s, and DB rows where
 `event_date` keeps the time sent (`2026-12-15T18:00:00Z` → `2026-12-15 18:00:00`) and
-`registration_deadline` = `event_date` − 24h, `organizer_id` matches
+`registration_deadline` = `event_date` − 2h, `organizer_id` matches
 the token user, fundraiser rows have `goal_amount` set and `capacity = 0`.
 
 ## 10. Group ticket booking tests (`POST /api/events/:id/tickets`, protected)
@@ -441,7 +441,35 @@ Sql "DELETE FROM tickets WHERE event_id IN ($std,$fund); DELETE FROM pledges WHE
 
 Expected: every line prints `PASS`, and the ticket booking prints `201`.
 
-## 12. Teardown
+## 12. Admin session refresh tests
+
+Admin promotion updates the database role. An already-open browser session must
+refresh that role from `GET /api/auth/me` before evaluating the `/admin/events`
+route, without requiring a manual logout.
+
+```powershell
+# Promote an existing verified account, then refresh the already-open app page.
+node server/scripts/promote-admin.js admin@connect.hku.hk
+
+# The browser should show the admin navigation and load /admin/events.
+# The API must also enforce the role from the database:
+curl.exe -i http://localhost:5000/api/auth/me -H "Authorization: ******"
+```
+
+Expected: the `/auth/me` response contains `"role":"admin"` and the signed-in
+browser can access `/admin/events`. An unverified account cannot be promoted.
+
+The admin events page has separate bulk actions:
+
+- **Delete all user-created events** cancels published Campus Hub events while
+  preserving their ticket and pledge records.
+- **Delete all CEDARS events** permanently removes published scraped events.
+
+CEDARS scraping verifies the event start date before saving: events whose
+`eventDate` is earlier than the current date are discarded, while current and
+future events are kept.
+
+## 13. Teardown
 
 ```powershell
 docker compose down        # keep data

@@ -37,15 +37,15 @@ function buildEventFilters({ source, search, categoryId, eventType, price, avail
   // Scraped events have their own section and only appear there until they end.
   if (source === 'external') {
     conditions.push('e.source IS NOT NULL', 'COALESCE(e.end_date, e.event_date) >= NOW()')
-  } else {
+  } else if (source === 'app') {
     conditions.push('e.source IS NULL')
   }
 
   if (search) {
     const pattern = `%${escapeLike(search)}%`
-    conditions.push(`(e.title LIKE ? ESCAPE '\\'
-      OR e.description LIKE ? ESCAPE '\\'
-      OR e.location LIKE ? ESCAPE '\\')`)
+    conditions.push(`(e.title LIKE ? ESCAPE '\\\\'
+      OR e.description LIKE ? ESCAPE '\\\\'
+      OR e.location LIKE ? ESCAPE '\\\\')`)
     params.push(pattern, pattern, pattern)
   }
   if (categoryId !== undefined) {
@@ -134,49 +134,44 @@ export async function releaseSeat(connection, eventId) {
   ])
 }
 
+// `values` is keyed by column name; SET ? expands it (mysql2 escapes every value).
 export async function insertEvent(connection, values) {
-  const columns = Object.keys(values)
-  const placeholders = columns.map(() => '?').join(', ')
-  const [rows] = await connection.query(
-    `INSERT INTO events (${columns.join(', ')}) VALUES (${placeholders}) RETURNING id`,
-    columns.map((column) => values[column]),
-  )
-  return rows[0].id
+  const [result] = await connection.query('INSERT INTO events SET ?', [values])
+  return result.insertId
 }
 
 export async function updateEvent(connection, eventId, values) {
-  const columns = Object.keys(values)
-  const assignments = columns.map((column) => `${column} = ?`).join(', ')
-  await connection.query(
-    `UPDATE events SET ${assignments}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-    [...columns.map((column) => values[column]), eventId],
-  )
+  await connection.query('UPDATE events SET ? WHERE id = ?', [values, eventId])
 }
 
 export async function cancelEvent(connection, eventId) {
   await connection.query(`UPDATE events SET status = 'cancelled' WHERE id = ?`, [eventId])
 }
 
+export async function deleteScrapedEvent(connection, eventId) {
+  await connection.query(`DELETE FROM events WHERE id = ? AND source IS NOT NULL`, [eventId])
+}
+
+export async function deleteAllCedarsEvents(connection) {
+  await connection.query(`DELETE FROM events WHERE source IS NOT NULL AND status = 'published'`)
+}
+
+export async function cancelAllUserEvents(connection) {
+  const [result] = await connection.query(`UPDATE events SET status = 'cancelled' WHERE source IS NULL AND status = 'published'`)
+  return result.affectedRows
+}
+
 // Inserts a scraped event, or refreshes the row uq_events_source finds. Setting status here
 // brings back an event that a previous scrape cancelled.
 export async function upsertScrapedEvent(values) {
-  const columns = Object.keys(values)
-  const placeholders = columns.map(() => '?').join(', ')
-  const updates = columns
-    .filter((column) => !['source', 'source_id'].includes(column))
-    .map((column) => `${column} = EXCLUDED.${column}`)
-    .join(', ')
-  await pool.query(
-    `INSERT INTO events (${columns.join(', ')}) VALUES (${placeholders})
-     ON CONFLICT (source, source_id) DO UPDATE SET ${updates}, updated_at = CURRENT_TIMESTAMP`,
-    columns.map((column) => values[column]),
-  )
+  const { source, source_id, organizer_id, ...changes } = values
+  await pool.query('INSERT INTO events SET ? ON DUPLICATE KEY UPDATE ?', [values, changes])
 }
 
 // Events that have not ended but are gone from the website were taken down by their organizer.
 export async function cancelMissingScrapedEvents(source, listedIds) {
   const [result] = await pool.query(
-    `UPDATE events SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP
+    `UPDATE events SET status = 'cancelled'
      WHERE source = ? AND status = 'published' AND source_id NOT IN (?)
        AND COALESCE(end_date, event_date) >= NOW()`,
     [source, listedIds],

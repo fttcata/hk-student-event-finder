@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { apiGet, apiPost } from '../api/client.js'
 import { fetchMyTickets } from '../api/events.js'
+import { ChatListSkeleton } from './LoadingSkeleton.jsx'
 import { useActivity } from '../context/ActivityContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { useEventChat } from '../hooks/useEventChat.js'
@@ -65,6 +67,7 @@ export default function FloatingEventChat() {
   const [isOpen, setIsOpen] = useState(false)
   const [selectedRoomId, setSelectedRoomId] = useState(null)
   const [ticketResult, setTicketResult] = useState({ ownerKey: '', tickets: [], error: '' })
+  const [messageResult, setMessageResult] = useState({ roomId: null, messages: [], error: '' })
   const [messageText, setMessageText] = useState('')
   const ownerKey = user ? String(user.id ?? user.email) : ''
 
@@ -72,7 +75,7 @@ export default function FloatingEventChat() {
     if (!ownerKey || !token) return undefined
 
     let active = true
-    fetchMyTickets()
+    const loadTickets = () => fetchMyTickets()
       .then((loadedTickets) => {
         if (active) setTicketResult({ ownerKey, tickets: loadedTickets, error: '' })
       })
@@ -85,9 +88,12 @@ export default function FloatingEventChat() {
           })
         }
       })
+    loadTickets()
+    window.addEventListener('campushub:ticket-booked', loadTickets)
 
     return () => {
       active = false
+      window.removeEventListener('campushub:ticket-booked', loadTickets)
     }
   }, [ownerKey, token])
 
@@ -97,15 +103,45 @@ export default function FloatingEventChat() {
   const loadingRooms = Boolean(ownerKey && token && !currentTicketResult)
   const rooms = buildRooms(tickets, bookings, now)
   const selectedRoom = rooms.find((room) => room.id === selectedRoomId) ?? null
-  const chatOpen = isOpen && selectedRoom?.chat.state === 'open'
-  const {
-    messages,
-    loading: loadingMessages,
-    error: conversationError,
-    canChat,
-    sending,
-    sendMessage: sendChatMessage,
-  } = useEventChat(selectedRoom?.id, { enabled: chatOpen })
+  const chatRoomId = selectedRoom?.id
+  const chatRoomState = selectedRoom?.chat.state
+  const messageResultForRoom = messageResult.roomId === chatRoomId ? messageResult : null
+  const remoteMessages = messageResultForRoom?.messages ?? []
+  const conversationError = messageResultForRoom?.error ?? ''
+  const loadingMessages = Boolean(
+    isOpen && chatRoomId && chatRoomState === 'open' && /^\d+$/.test(chatRoomId) && !messageResultForRoom,
+  )
+  const visibleMessages = [
+    ...remoteMessages,
+  ]
+
+  useEffect(() => {
+    if (!isOpen || !chatRoomId || chatRoomState !== 'open' || !/^\d+$/.test(chatRoomId)) return undefined
+
+    let active = true
+
+    async function loadMessages() {
+      try {
+        const data = await apiGet(`/events/${encodeURIComponent(chatRoomId)}/messages`)
+        if (active) setMessageResult({ roomId: chatRoomId, messages: data.messages ?? [], error: '' })
+      } catch (error) {
+        if (active) {
+          setMessageResult((current) => ({
+            roomId: chatRoomId,
+            messages: current.roomId === chatRoomId ? current.messages : [],
+            error: `Unable to load messages: ${error.message}`,
+          }))
+        }
+      }
+    }
+
+    loadMessages()
+    const timer = window.setInterval(loadMessages, 5000)
+    return () => {
+      active = false
+      window.clearInterval(timer)
+    }
+  }, [isOpen, chatRoomId, chatRoomState])
 
   if (!user || !token) return null
 
@@ -115,19 +151,28 @@ export default function FloatingEventChat() {
     if (!selectedRoom || selectedRoom.chat.state !== 'open' || !content || sending) return
 
     try {
-      const message = await sendChatMessage(content)
-      if (message) setMessageText('')
-    } catch {
-      return
+      const data = await apiPost(`/events/${encodeURIComponent(selectedRoom.id)}/messages`, { content })
+      setMessageResult((current) => ({
+        roomId: selectedRoom.id,
+        messages: [...(current.roomId === selectedRoom.id ? current.messages : []), data.message],
+        error: '',
+      }))
+      setMessageText('')
+    } catch (error) {
+      setMessageResult((current) => ({
+        ...current,
+        roomId: selectedRoom.id,
+        error: `Unable to send message: ${error.message}`,
+      }))
     }
   }
 
   return (
-    <div className="fixed bottom-5 right-5 z-50 sm:bottom-6 sm:right-6">
+    <div className="fixed bottom-4 right-3 z-50 sm:bottom-6 sm:right-6">
       {isOpen && (
         <section
           aria-label="Event chat"
-          className="absolute bottom-16 right-0 flex h-[min(34rem,calc(100dvh-7rem))] w-[min(24rem,calc(100vw-2rem))] flex-col overflow-hidden rounded-lg border border-line bg-paper shadow-2xl"
+          className="absolute bottom-16 right-0 flex h-[min(34rem,calc(100dvh-6rem))] w-[min(24rem,calc(100vw-1.5rem))] flex-col overflow-hidden rounded-lg border border-line bg-paper shadow-2xl"
         >
           <header className="flex items-center gap-3 border-b border-line bg-white/80 px-4 py-3">
             {selectedRoom ? (
@@ -165,7 +210,7 @@ export default function FloatingEventChat() {
           {!selectedRoom ? (
             <div className="min-h-0 flex-1 overflow-y-auto p-3">
               <p className="px-2 pb-3 pt-1 text-xs text-muted">Chats for events you’ve joined</p>
-              {loadingRooms && <p className="px-2 py-4 text-sm text-muted">Loading your event chats…</p>}
+              {loadingRooms && <ChatListSkeleton />}
               {roomError && <p role="alert" className="px-2 py-3 text-sm text-accent">{roomError}</p>}
               {!loadingRooms && rooms.length === 0 && !roomError && (
                 <div className="rounded-sm border border-dashed border-line p-5 text-center">
@@ -230,22 +275,15 @@ export default function FloatingEventChat() {
                 {!loadingMessages && messages.length === 0 && selectedRoom.chat.state === 'open' && !conversationError && (
                   <p className="pt-8 text-center text-sm text-muted">No messages yet. Say hello to the group.</p>
                 )}
-                {messages.map((message) => {
-                  const isOwn = message.user_id === user.id
-                  return (
-                    <div
-                      key={message.id}
-                      className={`max-w-[88%] rounded-lg px-3 py-2 text-sm ${
-                        isOwn ? 'ml-auto bg-ink text-paper' : 'mr-auto bg-white'
-                      }`}
-                    >
-                      <p className={`mb-1 text-xs font-semibold ${isOwn ? 'text-paper/70' : 'text-teal'}`}>
-                        {isOwn ? 'You' : message.user_name || 'Student'}
-                      </p>
-                      <p className="whitespace-pre-wrap break-words">{message.content}</p>
-                    </div>
-                  )
-                })}
+                {visibleMessages.map((message) => (
+                  <div
+                    key={message.id}
+                    className="max-w-[88%] rounded-lg bg-white px-3 py-2 text-sm"
+                  >
+                    <p className="mb-1 text-xs font-semibold text-teal">{message.user_name || 'Student'}</p>
+                    <p className="whitespace-pre-wrap break-words">{message.content}</p>
+                  </div>
+                ))}
               </div>
 
               {selectedRoom.chat.state === 'open' ? (
@@ -279,7 +317,7 @@ export default function FloatingEventChat() {
                   <div className="border-t border-line bg-white/80 p-4 text-center text-xs text-muted">
                     {loadingMessages || !conversationError ? 'Connecting to chat…' : 'Messaging is unavailable.'}
                   </div>
-                )
+                </form>
               ) : (
                 <div className="border-t border-line bg-white/80 p-4 text-center text-xs text-muted">
                   Messaging is unavailable while this room is {selectedRoom.chat.state}.

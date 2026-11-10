@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { cancelEvent, fetchManagedEvents } from '../api/events.js'
+import {
+  cancelAllUserEvents,
+  cancelEvent,
+  deleteAllCedarsEvents,
+  deleteEvent,
+  fetchManagedEvents,
+  refreshCedarsEvents,
+} from '../api/events.js'
 import { formatDateTime, formatMoney, getEventKind, KIND_LABELS } from '../utils/format.js'
 
 const PAGE_SIZE = 12
@@ -10,6 +17,7 @@ export default function AdminEventsPage() {
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [scraping, setScraping] = useState(false)
 
   const loadEvents = useCallback(async () => {
     try {
@@ -41,6 +49,68 @@ export default function AdminEventsPage() {
     }
   }
 
+  async function handleDelete(event) {
+    if (!window.confirm(`Permanently delete the CEDARS event "${event.title}"?`)) return
+
+    setError('')
+    try {
+      await deleteEvent(event.id)
+      setResult((current) => ({
+        ...current,
+        events: current.events.filter((item) => item.id !== event.id),
+        total: Math.max(0, current.total - 1),
+      }))
+    } catch (requestError) {
+      setError(requestError.message)
+    }
+  }
+
+  async function handleDeleteAllUserEvents() {
+    if (!window.confirm('Cancel all user-created events? Existing tickets and pledges will be kept.')) return
+
+    setError('')
+    setLoading(true)
+    try {
+      await cancelAllUserEvents()
+      await loadEvents()
+    } catch (requestError) {
+      setLoading(false)
+      setError(requestError.message)
+    }
+  }
+
+  async function handleDeleteAllCedarsEvents() {
+    if (!window.confirm('Permanently delete all CEDARS events? This cannot be undone.')) return
+
+    setError('')
+    setLoading(true)
+    try {
+      await deleteAllCedarsEvents()
+      await loadEvents()
+    } catch (requestError) {
+      setLoading(false)
+      setError(requestError.message)
+    }
+  }
+
+  async function handleScrape() {
+    setScraping(true)
+    setError('')
+    try {
+      await refreshCedarsEvents()
+      if (page === 1) {
+        await loadEvents()
+      } else {
+        setPage(1)
+        setLoading(true)
+      }
+    } catch (requestError) {
+      setError(requestError.message)
+    } finally {
+      setScraping(false)
+    }
+  }
+
   const pageCount = Math.max(1, Math.ceil(result.total / PAGE_SIZE))
 
   return (
@@ -49,11 +119,20 @@ export default function AdminEventsPage() {
         <div>
           <p className="eyebrow">Admin</p>
           <h1 className="display mt-4 text-5xl md:text-6xl">Manage events</h1>
-          <p className="mt-3 text-sm text-muted">Edit listings or cancel events across Campus Hub.</p>
+          <p className="mt-3 text-sm text-muted">Manage Campus Hub and CEDARS events.</p>
         </div>
-        <Link to="/events" className="btn btn-outline self-start sm:self-auto">
-          Browse events
-        </Link>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" className="btn btn-accent" disabled={scraping} onClick={handleScrape}>
+            {scraping ? 'Refreshing CEDARS…' : 'Refresh CEDARS events'}
+          </button>
+          <button type="button" className="btn btn-outline text-accent" onClick={handleDeleteAllUserEvents}>
+            Delete all user-created events
+          </button>
+          <button type="button" className="btn btn-outline text-accent" onClick={handleDeleteAllCedarsEvents}>
+            Delete all CEDARS events
+          </button>
+          <Link to="/events" className="btn btn-outline self-start sm:self-auto">Browse events</Link>
+        </div>
       </div>
 
       <p className="mt-8 font-mono text-xs text-muted">
@@ -75,7 +154,7 @@ export default function AdminEventsPage() {
                   <p className="font-mono text-xs text-muted">{formatDateTime(event.date)}</p>
                   <h2 className="display mt-1 truncate text-2xl">{event.title}</h2>
                   <p className="mt-1 text-sm text-muted">
-                    {KIND_LABELS[kind]} · {event.organizer} · {event.status}
+                    {event.isScraped ? 'CEDARS' : KIND_LABELS[kind]} · {event.organizer} · {event.status}
                     {kind === 'fundraiser'
                       ? ` · ${formatMoney(event.raised)} raised`
                       : ` · ${event.booked}${event.capacity ? ` / ${event.capacity}` : ''} tickets`}
@@ -85,7 +164,11 @@ export default function AdminEventsPage() {
                   <Link to={`/events/${event.id}`} className="btn btn-outline py-2">
                     View
                   </Link>
-                  {event.status !== 'cancelled' && (
+                  {event.isScraped ? (
+                    <button type="button" className="btn btn-outline py-2 text-accent" onClick={() => handleDelete(event)}>
+                      Delete
+                    </button>
+                  ) : event.status !== 'cancelled' && (
                     <>
                       <Link to={`/events/${event.id}/edit`} className="btn btn-dark py-2">
                         Edit

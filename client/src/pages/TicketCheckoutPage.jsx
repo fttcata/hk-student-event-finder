@@ -6,6 +6,7 @@ import { useActivity } from '../context/ActivityContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { useEvents } from '../hooks/useEvents.js'
 import { formatDateTime, formatMoney } from '../utils/format.js'
+import TicketQrCode from '../components/TicketQrCode.jsx'
 
 const STEPS = [
   ['attendees', 'Attendee details'],
@@ -14,6 +15,13 @@ const STEPS = [
 ]
 
 const MAX_TICKETS_PER_ORDER = 4
+
+function validateCardDetails(card) {
+  if (!/^\d{16}$/.test(card.number)) return 'Card number must contain exactly 16 digits.'
+  if (!/^(0[1-9]|1[0-2])\/\d{2}$/.test(card.expiry)) return 'Expiry date must use MM/YY format.'
+  if (!/^\d{3}$/.test(card.cvc)) return 'CVV must contain exactly 3 digits.'
+  return ''
+}
 
 function CheckoutProgress({ currentStep }) {
   const activeIndex = STEPS.findIndex(([key]) => key === currentStep)
@@ -113,7 +121,7 @@ function CheckoutFlow({ id }) {
   if (event.isScraped) {
     return (
       <main className="mx-auto max-w-3xl px-4 py-16 sm:px-6">
-        <p className="text-muted">Tickets for web-scraped events must be booked on the original event website.</p>
+        <p className="text-muted">Tickets for CEDARS events must be booked on the original event website.</p>
         <Link to={`/events/${id}`} className="mt-4 inline-block text-sm text-muted hover:text-accent">
           ← Back to event
         </Link>
@@ -139,12 +147,20 @@ function CheckoutFlow({ id }) {
 
   async function completeCheckout(formEvent) {
     formEvent.preventDefault()
-    setSaving(true)
     setError('')
+    if (isPaid) {
+      const cardError = validateCardDetails(card)
+      if (cardError) {
+        setError(cardError)
+        return
+      }
+    }
+    setSaving(true)
     try {
       if (isApiEvent) {
         const booking = await bookEventTickets(event.id, { attendees })
         setResult(booking)
+        window.dispatchEvent(new Event('campushub:ticket-booked'))
       } else {
         const booking = bookTicket(event, attendees)
         setResult({
@@ -256,10 +272,12 @@ function CheckoutFlow({ id }) {
                       autoComplete="off"
                       inputMode="numeric"
                       className="input"
-                      placeholder="Any number for this demo"
+                      maxLength={16}
+                      pattern="\d{16}"
+                      placeholder="16 digits"
                       required
                       value={card.number}
-                      onChange={(e) => setCard({ ...card, number: e.target.value })}
+                      onChange={(e) => setCard({ ...card, number: e.target.value.replace(/\D/g, '').slice(0, 16) })}
                     />
                   </Field>
                   <div className="grid grid-cols-2 gap-3">
@@ -269,9 +287,14 @@ function CheckoutFlow({ id }) {
                         autoComplete="off"
                         className="input"
                         placeholder="MM/YY"
+                        maxLength={5}
+                        pattern="(0[1-9]|1[0-2])\/\d{2}"
                         required
                         value={card.expiry}
-                        onChange={(e) => setCard({ ...card, expiry: e.target.value })}
+                        onChange={(e) => {
+                          const value = e.target.value.replace(/\D/g, '').slice(0, 4)
+                          setCard({ ...card, expiry: value.length > 2 ? `${value.slice(0, 2)}/${value.slice(2)}` : value })
+                        }}
                       />
                     </Field>
                     <Field label="CVC" htmlFor="card-cvc">
@@ -280,10 +303,12 @@ function CheckoutFlow({ id }) {
                         autoComplete="off"
                         inputMode="numeric"
                         className="input"
-                        placeholder="CVC"
+                        maxLength={3}
+                        pattern="\d{3}"
+                        placeholder="3 digits"
                         required
                         value={card.cvc}
-                        onChange={(e) => setCard({ ...card, cvc: e.target.value })}
+                        onChange={(e) => setCard({ ...card, cvc: e.target.value.replace(/\D/g, '').slice(0, 3) })}
                       />
                     </Field>
                   </div>
@@ -331,6 +356,9 @@ function CheckoutFlow({ id }) {
                     <p className="font-semibold">{ticket.attendee_name}</p>
                     <p className="mt-1 text-sm text-muted">{ticket.attendee_email}</p>
                     <p className="mt-2 font-mono text-sm">Ticket: {ticket.reference_code}</p>
+                    <div className="mt-4">
+                      <TicketQrCode value={ticket.reference_code} />
+                    </div>
                     {emailStatus && (
                       <p className={`mt-2 text-xs ${emailStatus.sent ? 'text-teal' : 'text-accent'}`}>
                         {emailStatus.sent ? 'Confirmation email sent' : 'Email could not be sent; keep this ticket reference'}

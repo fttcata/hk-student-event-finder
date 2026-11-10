@@ -18,7 +18,8 @@ export function normalizeEvent(raw) {
       raw.sourceType === 'web_scraped' ||
       raw.event_type === 'web_scraped' ||
       raw.type === 'web_scraped' ||
-      raw.type === 'scraped',
+      raw.type === 'scraped' ||
+      raw.source != null,
     isExternal: raw.is_external === true || raw.source != null,
     originalUrl: raw.original_url ?? raw.source_url ?? raw.originalUrl ?? raw.sourceUrl ?? '',
     date: raw.date,
@@ -57,7 +58,7 @@ export async function fetchAllEvents() {
   }
 }
 
-// GET /api/events → the backend API. Filters map 1:1 to the backend query params
+// GET /api/events → MySQL. Filters map 1:1 to the backend query params
 // (search, category_id, event_type, availability, price, page, limit).
 // Falls back to demo data so the UI is still usable without the backend.
 export async function fetchEvents(filters = {}) {
@@ -125,6 +126,22 @@ export async function updateEvent(id, event) {
 export async function cancelEvent(id) {
   const data = await apiDelete(`/events/${encodeURIComponent(id)}`)
   return normalizeEvent(data.event)
+}
+
+export async function deleteEvent(id) {
+  return apiDelete(`/events/${encodeURIComponent(id)}`)
+}
+
+export async function refreshCedarsEvents() {
+  return apiPost('/events/admin/scrape', {})
+}
+
+export async function cancelAllUserEvents() {
+  return apiDelete('/events/admin/user-created')
+}
+
+export async function deleteAllCedarsEvents() {
+  return apiDelete('/events/admin/cedars')
 }
 
 export async function bookEventTickets(id, { attendees }) {

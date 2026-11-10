@@ -21,7 +21,7 @@ export default function EventCard({ event }) {
     <article className={`flex min-h-64 flex-col border-t-[3px] p-6 ${KIND_STYLES[cardKind]}`}>
       <div className="flex items-center justify-between gap-3 font-mono text-xs text-muted">
         <span>{formatDate(event.date)}</span>
-        <span className="badge">{external ? 'Web-scraped' : KIND_LABELS[kind]}</span>
+        <span className="badge">{external ? 'CEDARS' : KIND_LABELS[kind]}</span>
       </div>
 
       <h3 className="display mt-auto pt-8 text-2xl">{event.title}</h3>

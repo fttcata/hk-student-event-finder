@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom'
-import ApiStatus from '../components/ApiStatus.jsx'
 import EventCard from '../components/EventCard.jsx'
+import { EventGridSkeleton } from '../components/LoadingSkeleton.jsx'
 import { useEvents } from '../hooks/useEvents.js'
 import { byDate } from '../utils/format.js'
 
@@ -11,7 +11,7 @@ const STEPS = [
 ]
 
 export default function HomePage() {
-  const { events, source } = useEvents()
+  const { events, loading } = useEvents()
 
   const sorted = [...events].sort(byDate)
   const upcoming = sorted.filter((event) => new Date(event.date) >= new Date())
@@ -19,7 +19,7 @@ export default function HomePage() {
 
   return (
     <main>
-      <section className="mx-auto max-w-6xl bg-[radial-gradient(circle_at_72%_48%,#e0e8cc_0,transparent_34%)] px-4 pt-16 pb-24 sm:px-6 md:pt-24">
+      <section className="mx-auto max-w-6xl bg-[radial-gradient(circle_at_72%_48%,#dceafa_0,transparent_34%)] px-4 pt-16 pb-24 sm:px-6 md:pt-24">
         <p className="eyebrow">Campus Hub · HKU · CUHK · PolyU</p>
         <h1 className="display mt-6 max-w-3xl text-5xl sm:text-7xl lg:text-8xl">
           Find your next <em className="text-accent not-italic">good reason</em> to show up.
@@ -44,13 +44,16 @@ export default function HomePage() {
             <p className="eyebrow">Up next</p>
             <h2 className="display mt-4 max-w-md text-4xl">Events worth leaving your room for.</h2>
           </div>
-          <ApiStatus source={source} />
         </div>
-        <div className="grid gap-4 md:grid-cols-3">
-          {featured.map((event) => (
-            <EventCard key={event.id} event={event} />
-          ))}
-        </div>
+        {loading ? (
+          <EventGridSkeleton className="md:grid-cols-3" />
+        ) : (
+          <div className="grid gap-4 md:grid-cols-3">
+            {featured.map((event) => (
+              <EventCard key={event.id} event={event} />
+            ))}
+          </div>
+        )}
       </section>
 
       <section className="mx-auto max-w-6xl border-t border-line px-4 py-14 sm:px-6">
