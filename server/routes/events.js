@@ -4,7 +4,7 @@ import { Router } from 'express'
 import { sendBookingSummary, sendDonationReceipt, sendTicketReceipt } from '../config/email.js'
 import { optionalAuth, requireAdmin, requireAuth } from '../middleware/auth.js'
 import { findCategoryById, findCategoryByName } from '../queries/categories.js'
-import { isChatMember, listEventMessages } from '../queries/chat.js'
+import { insertEventMessage, isChatMember, listEventMessages } from '../queries/chat.js'
 import { logEmail } from '../queries/emailLog.js'
 import {
   cancelEvent,
@@ -310,6 +310,20 @@ async function requireChatAccess(request, response, next) {
 router.get('/:id/messages', requireAuth, requireChatAccess, async (request, response) => {
   const messages = await listEventMessages(request.eventId)
   return response.status(200).json({ messages })
+})
+
+router.post('/:id/messages', requireAuth, requireChatAccess, async (request, response) => {
+  const content = typeof request.body?.content === 'string' ? request.body.content.trim() : ''
+  if (!content || content.length > 1000) {
+    return response.status(400).json({ error: 'Message must contain between 1 and 1000 characters' })
+  }
+
+  const message = await insertEventMessage({
+    eventId: request.eventId,
+    userId: request.user.id,
+    content,
+  })
+  return response.status(201).json({ message })
 })
 
 // Upper bounds keep values inside their columns (DECIMAL(8,2), DECIMAL(10,2), INT UNSIGNED, TEXT),
@@ -790,8 +804,9 @@ router.post('/:id/tickets', requireAuth, rejectExternalEvent, async (request, re
     }
     normalizedAttendees.push({ name, email })
   }
+  const emails = normalizedAttendees.map((attendee) => attendee.email)
 
-  const ticketIds = []
+  const ticketCodes = []
   const earlyResponse = await withTransaction(async (connection) => {
     const event = await lockEventForBooking(connection, eventId)
     if (!event) return { status: 404, body: EVENT_NOT_FOUND }
@@ -851,7 +866,6 @@ router.post('/:id/tickets', requireAuth, rejectExternalEvent, async (request, re
         status: 409,
         body: { error: `Not enough seats left (${event.available_tickets} available)` },
       }
-      if (!inserted) throw new Error('Could not generate a unique ticket reference')
     }
     await reserveSeats(connection, eventId, seats)
 
