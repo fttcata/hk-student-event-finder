@@ -33,6 +33,7 @@ import {
 } from '../queries/tickets.js'
 import { withTransaction } from '../queries/transaction.js'
 import { findUsersByEmails } from '../queries/users.js'
+import { getChatAccess } from '../utils/chatAccess.js'
 
 const router = Router()
 
@@ -271,41 +272,20 @@ router.get('/:id', optionalAuth, async (request, response) => {
   return response.status(200).json({ event })
 })
 
-const CHAT_OPENS_BEFORE_MS = 6 * 60 * 60 * 1000
-const CHAT_CLOSES_AFTER_MS = 7 * 24 * 60 * 60 * 1000
-
 // HANDOFF.md §1 and §3: chat is for verified ticket holders and donors, from 6 hours before the
 // event until 7 days after it. Runs after requireAuth and sets request.eventId.
 async function requireChatAccess(request, response, next) {
-  if (!request.user.is_verified) {
-    return response.status(403).json({ error: 'Verify your student email before using the event chat' })
-  }
-
   const eventId = parseEventId(request.params.id)
   if (eventId === null) return response.status(404).json(EVENT_NOT_FOUND)
 
-  const event = await findEventStatus(eventId)
-  if (!event) return response.status(404).json(EVENT_NOT_FOUND)
-
-  if (!(await isChatMember(request.user.id, eventId))) {
-    return response.status(403).json({ error: 'Only ticket holders and donors can access the event chat' })
-  }
-
-  if (event.status === 'cancelled') {
-    return response.status(403).json({ error: 'This event has been cancelled' })
-  }
-  const now = Date.now()
-  const startsAt = event.event_date.getTime()
-  if (now < startsAt - CHAT_OPENS_BEFORE_MS) {
-    return response.status(403).json({ error: 'Chat opens 6 hours before the event' })
-  }
-  if (now > startsAt + CHAT_CLOSES_AFTER_MS) {
-    return response.status(403).json({ error: 'Chat has closed' })
-  }
+  const access = await getChatAccess(request.user, eventId)
+  if (access.error) return response.status(access.status).json({ error: access.error })
 
   request.eventId = eventId
   return next()
 }
+
+const MAX_CHAT_MESSAGE_LENGTH = 1000
 
 router.get('/:id/messages', requireAuth, requireChatAccess, async (request, response) => {
   const messages = await listEventMessages(request.eventId)

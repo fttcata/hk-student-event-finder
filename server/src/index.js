@@ -1,11 +1,13 @@
 // Must stay the first import: later modules read process.env while they load.
 import 'dotenv/config'
+import { createServer } from 'node:http'
 import cors from 'cors'
 import express from 'express'
 import helmet from 'helmet'
 import { pool } from '../config/db.js'
 import { reportSmtpStatus } from '../config/email.js'
 import { errorHandler, notFound } from '../middleware/errors.js'
+import { attachChatServer } from '../realtime/chat.js'
 import authRoutes from '../routes/auth.js'
 import categoryRoutes from '../routes/categories.js'
 import eventRoutes from '../routes/events.js'
@@ -39,7 +41,10 @@ app.use('/api/users', userRoutes)
 app.use('/api', notFound)
 app.use(errorHandler)
 
-app.listen(port, () => {
+const server = createServer(app)
+attachChatServer(server)
+
+server.listen(port, () => {
   console.log(`API listening at http://localhost:${port}`)
   reportSmtpStatus()
 })

@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState } from 'react'
 import { usePersistentState } from '../hooks/usePersistentState.js'
 import { apiGet } from '../api/client.js'
 import { loginUser, registerUser, verifyUser } from '../api/auth.js'
+import { disconnectChatSocket } from '../realtime/chatSocket.js'
 import { validatePassword, validateStudentEmail } from '../utils/validation.js'
 
 const AuthContext = createContext(null)
@@ -14,6 +15,7 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     function handleSessionExpired() {
+      disconnectChatSocket()
       setToken('')
       setUser(null)
     }
@@ -76,6 +78,7 @@ export function AuthProvider({ children }) {
   }
 
   function logout() {
+    disconnectChatSocket()
     setToken('')
     setUser(null)
   }

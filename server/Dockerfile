@@ -10,6 +10,7 @@ COPY config ./config
 COPY routes ./routes
 COPY queries ./queries
 COPY middleware ./middleware
+COPY realtime ./realtime
 COPY utils ./utils
 COPY scrapers ./scrapers
 COPY scripts ./scripts

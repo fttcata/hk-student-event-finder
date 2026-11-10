@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "nodemon src/index.js",
     "start": "node src/index.js",
-    "scrape:cedars": "node scripts/scrapeCedars.js"
+    "scrape:cedars": "node scripts/scrapeCedars.js",
+    "test": "node --test \"tests/**/*.test.js\""
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
@@ -15,10 +16,12 @@
     "express": "^5.2.1",
     "helmet": "^8.3.0",
     "jsonwebtoken": "^9.0.3",
-    "mysql2": "^3.24.4",
-    "nodemailer": "^10.0.16"
+    "nodemailer": "^10.0.16",
+    "pg": "^8.16.3",
+    "socket.io": "^4.8.4"
   },
   "devDependencies": {
-    "nodemon": "^3.1.14"
+    "nodemon": "^3.1.14",
+    "socket.io-client": "^4.8.4"
   }
 }
