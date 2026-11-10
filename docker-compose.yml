@@ -13,12 +13,25 @@ services:
       - mysql_data:/var/lib/mysql
       - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
 
+  # Local SMTP catcher for demos: every receipt the API sends lands here instead of a real inbox.
+  # Web UI: http://localhost:8025 — SMTP: mailpit:1025 inside the Compose network, localhost:1025 on the host.
+  mailpit:
+    image: axllent/mailpit:latest
+    restart: unless-stopped
+    environment:
+      # email.js always sends credentials, so accept any username/password without TLS.
+      MP_SMTP_AUTH_ACCEPT_ANY: 1
+      MP_SMTP_AUTH_ALLOW_INSECURE: 1
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+
   server:
     build:
       context: ./server
       dockerfile: Dockerfile
-    # SMTP_* come from server/.env (gitignored; copy server/.env.example). The values under
-    # `environment` below take precedence, so the DB settings there always point at the mysql service.
+    # server/.env is optional local configuration. The values below always point the container
+    # at the Compose services; override SMTP_* in the shell or a root .env to use a real provider.
     env_file:
       - path: ./server/.env
         required: false
@@ -32,8 +45,18 @@ services:
       DB_PASSWORD: app_password
       JWT_SECRET: dev_only_jwt_secret_change_in_production
       JWT_EXPIRES_IN: 1d
+      # Default to the bundled Mailpit catcher so the email demo works out of the box.
+      # Override from the shell or a root .env to use Mailtrap: SMTP_HOST=... docker compose up -d
+      SMTP_HOST: ${SMTP_HOST:-mailpit}
+      SMTP_PORT: ${SMTP_PORT:-1025}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USER: ${SMTP_USER:-mailpit}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-mailpit}
+      SMTP_FROM: ${SMTP_FROM:-no-reply@campushub.local}
     depends_on:
       mysql:
+        condition: service_started
+      mailpit:
         condition: service_started
     ports:
       - "5001:5000"

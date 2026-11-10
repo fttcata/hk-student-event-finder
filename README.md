@@ -57,9 +57,41 @@ events from the Admin link; cancelling an event keeps its tickets and pledges as
 
 The database credentials in `server/.env.example` match `docker-compose.yml` for local development only. Do not use them in production.
 
-Email receipts: set `SMTP_USER` / `SMTP_PASSWORD` in `server/.env` to your Mailtrap sandbox credentials
-(Mailtrap → Sandboxes → SMTP). The Docker server reads its `SMTP_*` settings from that file too, so run
-`docker compose up -d server` after changing it. On startup the server logs `SMTP ready` or why SMTP failed.
+Email receipts: `docker compose up -d` also starts **Mailpit**, a local mock SMTP server, so every booking
+confirmation and donation receipt appears in the mock inbox at `http://localhost:8025` — no external
+credentials required. On startup the server logs `SMTP ready (mailpit:1025)`; if you see a warning instead,
+recreate the server container with `docker compose up -d server`.
+
+### Demo data (presentation prep)
+
+With the stack running, seed realistic Hong Kong university events (free, paid, sold out, and fundraisers
+with live goal progress):
+
+```sh
+cd server
+npm run db:populate-demo             # add anything missing; safe to rerun
+npm run db:populate-demo -- --reset  # rebuild the demo events with fresh dates
+```
+
+`--reset` also cancels app events whose date has already passed, so the listing opens on upcoming
+events instead of leftovers from an earlier seed.
+
+The script creates 8 organizer accounts, 160 student accounts, confirmed tickets, pledges, chat messages
+and bookmarks. Demo logins (the client only accepts HKU/CUHK/PolyU domains):
+
+- `demo.student@connect.hku.hk` / `Demo1234!` — student dashboard with tickets and a donation
+- `hku.careers@connect.hku.hk` / `Demo1234!` — organizer of the HKU Careers Fair
+
+To use a Mailtrap sandbox in Docker instead of Mailpit, override the SMTP settings for Compose (shell
+variables or a root `.env`, which Compose reads for interpolation):
+
+```sh
+SMTP_HOST=sandbox.smtp.mailtrap.io SMTP_PORT=2525 \
+SMTP_USER=your-mailtrap-username SMTP_PASSWORD=your-mailtrap-password \
+  docker compose up -d server
+```
+
+For non-Docker development, `server/.env` already points at Mailpit on `127.0.0.1:1025`.
 
 Ticket checkout collects a name and email address for each attendee. Each ticket is stored with its
 attendee details and its own reference code, and confirmation is sent to that attendee when SMTP is

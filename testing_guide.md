@@ -370,9 +370,9 @@ The three paid tickets total HK$60 with `available_tickets = 0`; the free event 
 `available_tickets = 2`; exactly one race seat is confirmed. Every ticket code is a UUID,
 `reference_code` aliases it for older clients, and cancellation through
 `DELETE /events/:id/ticket` restores one seat before rebooking consumes it again. Receipts are
-sent in the background: without `server/.env` SMTP credentials the responses still include
-`email_queued: true`, all `email_log` rows appear as `failed`, and with Mailtrap credentials
-those rows become `sent`.
+sent in the background: without SMTP settings the responses still include `email_queued: true`
+and all `email_log` rows appear as `failed`; with the bundled Mailpit mock server (the Compose
+default) or Mailtrap credentials those rows become `sent`.
 
 ## 11. Event chat tests (`GET /api/events/:id/messages`, protected)
 

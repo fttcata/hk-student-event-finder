@@ -57,7 +57,8 @@ export async function listTicketsByCodes(ticketCodes) {
 
 export async function listTicketRowsForUser(userId) {
   const [rows] = await pool.query(
-    `SELECT t.id, t.ticket_code, t.type, t.status, t.amount_paid, t.created_at,
+    `SELECT t.id, t.ticket_code, t.type, t.status, t.amount_paid, t.attendee_name, t.attendee_email,
+            t.created_at,
             e.id AS event_id, e.title, e.event_date, e.location, e.address, e.image_url,
             e.event_type, e.status AS event_status, e.price, c.name AS category
      FROM tickets t
