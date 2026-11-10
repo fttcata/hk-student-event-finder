@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { apiGet, apiPost } from '../api/client.js'
 import { useAuth } from '../context/AuthContext.jsx'
 import { useEventChat } from '../hooks/useEventChat.js'
 import { useNow } from '../hooks/useNow.js'
@@ -10,11 +9,7 @@ export default function EventChatRoom({ event }) {
   const { user } = useAuth()
   const location = useLocation()
   const now = useNow()
-  const [messages, setMessages] = useState([])
-  const [error, setError] = useState('')
-  const [accessNotice, setAccessNotice] = useState('')
   const [messageText, setMessageText] = useState('')
-  const [sending, setSending] = useState(false)
   const [chatExpanded, setChatExpanded] = useState(false)
 
   const chat = getChatStatus(event.date, now)
@@ -28,48 +23,11 @@ export default function EventChatRoom({ event }) {
     const content = messageText.trim()
     if (!content || sending) return
 
-    let active = true
-    let timer
-    const load = async () => {
-      try {
-        const data = await apiGet(`/events/${encodeURIComponent(event.id)}/messages`)
-        if (!active) return
-        setMessages(data.messages || [])
-        setError('')
-      } catch (requestError) {
-        if (!active) return
-        if (requestError.status === 401 || requestError.status === 403) {
-          // Retrying cannot help: the booking and pledge panels close before the chat opens.
-          clearInterval(timer)
-          setAccessNotice(requestError.message)
-        } else {
-          setError(requestError.message)
-        }
-      }
-    }
-    timer = setInterval(load, POLL_INTERVAL_MS)
-    load()
-    return () => {
-      active = false
-      clearInterval(timer)
-    }
-  }
-
-  async function sendMessage(formEvent) {
-    formEvent.preventDefault()
-    const content = messageText.trim()
-    if (!content || sending) return
-
-    setSending(true)
-    setError('')
     try {
-      const data = await apiPost(`/events/${encodeURIComponent(event.id)}/messages`, { content })
-      setMessages((current) => [...current, data.message])
+      await sendMessage(content)
       setMessageText('')
-    } catch (requestError) {
-      setError(requestError.message)
-    } finally {
-      setSending(false)
+    } catch {
+      // useEventChat surfaces the failure through `error`.
     }
   }
 
@@ -93,17 +51,14 @@ export default function EventChatRoom({ event }) {
       </div>
       {isOpen && !user && (
         <p className="mt-4 text-sm text-muted">
+          Chat is open to ticket holders and donors.{' '}
           <Link to="/login" state={{ from: location.pathname }} className="btn btn-accent mt-2 inline-flex">
             Log in to chat
           </Link>
         </p>
       )}
-      {isOpen && !user && (
-        <p className="text-sm text-muted">Chat is open to ticket holders and donors.</p>
-      )}
-      {isOpen && user && chatExpanded && accessNotice && <p className="mt-4 text-sm text-muted">{accessNotice}</p>}
       {isOpen && user && chatExpanded && error && <p className="mt-3 text-sm text-accent">{error}</p>}
-      {isOpen && user && chatExpanded && !accessNotice && (
+      {isOpen && user && chatExpanded && (
         <>
           <div className="mt-4 space-y-2">
             {messages.length ? messages.map((message) => (
@@ -111,7 +66,7 @@ export default function EventChatRoom({ event }) {
                 <strong>{message.user_id === user.id ? 'You' : message.user_name || 'Student'}:</strong>{' '}
                 <span className="whitespace-pre-wrap break-words">{message.content}</span>
               </p>
-            ))}
+            )) : null}
             {!loading && messages.length === 0 && !error && (
               <p className="text-sm text-muted">No messages yet.</p>
             )}
@@ -141,22 +96,8 @@ export default function EventChatRoom({ event }) {
               <p className="mt-2 text-[10px] text-muted">
                 Messages are visible to this event’s ticket holders and donors.
               </p>
-            )) : <p className="text-sm text-muted">No messages yet.</p>}
-          </div>
-          <form className="mt-4 flex gap-2" onSubmit={sendMessage}>
-            <label className="sr-only" htmlFor="event-chat-message">Write a message</label>
-            <input
-              id="event-chat-message"
-              className="input"
-              maxLength={1000}
-              placeholder="Message this event group…"
-              value={messageText}
-              onChange={(formEvent) => setMessageText(formEvent.target.value)}
-            />
-            <button type="submit" className="btn btn-accent shrink-0" disabled={sending || !messageText.trim()}>
-              Send
-            </button>
-          </form>
+            </form>
+          )}
         </>
       )}
     </section>

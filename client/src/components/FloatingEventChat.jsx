@@ -5,7 +5,6 @@ import { fetchMyTickets } from '../api/events.js'
 import { ChatListSkeleton } from './LoadingSkeleton.jsx'
 import { useActivity } from '../context/ActivityContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
-import { useEventChat } from '../hooks/useEventChat.js'
 import { useNow } from '../hooks/useNow.js'
 import { formatDateTime, getChatStatus } from '../utils/format.js'
 
@@ -317,7 +316,7 @@ export default function FloatingEventChat() {
                   <div className="border-t border-line bg-white/80 p-4 text-center text-xs text-muted">
                     {loadingMessages || !conversationError ? 'Connecting to chat…' : 'Messaging is unavailable.'}
                   </div>
-                </form>
+                )
               ) : (
                 <div className="border-t border-line bg-white/80 p-4 text-center text-xs text-muted">
                   Messaging is unavailable while this room is {selectedRoom.chat.state}.

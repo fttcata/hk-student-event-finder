@@ -44,6 +44,7 @@ export function AuthProvider({ children }) {
       .catch((error) => {
         if (!active) return
         if (error.status === 401) {
+          setAuthToken('')
           setToken('')
           setUser(null)
         } else {
