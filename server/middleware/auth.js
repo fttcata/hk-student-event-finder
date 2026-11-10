@@ -2,11 +2,10 @@ import { verifyToken } from '../config/jwt.js'
 import { findUserById } from '../queries/users.js'
 import { serializeUser } from '../utils/users.js'
 
-// Resolves "Authorization: Bearer <token>" to { user } or { error }.
-// The user is re-read from the DB so a deleted account or a newly verified email takes effect immediately.
-async function authenticate(request) {
-  const [scheme, token] = (request.headers.authorization || '').split(' ')
-  if (scheme !== 'Bearer' || !token) return { error: 'Authentication required' }
+// Resolves a JWT to { user } or { error }. The user is re-read from the DB so a deleted account
+// or a newly verified email takes effect immediately.
+export async function authenticateToken(token) {
+  if (!token) return { error: 'Authentication required' }
 
   let payload
   try {
@@ -18,6 +17,13 @@ async function authenticate(request) {
   const row = await findUserById(payload.sub)
   if (!row) return { error: 'User no longer exists' }
   return { user: serializeUser(row) }
+}
+
+// Resolves "Authorization: Bearer <token>" to { user } or { error }.
+async function authenticate(request) {
+  const [scheme, token] = (request.headers.authorization || '').split(' ')
+  if (scheme !== 'Bearer' || !token) return { error: 'Authentication required' }
+  return authenticateToken(token)
 }
 
 export async function requireAuth(request, response, next) {

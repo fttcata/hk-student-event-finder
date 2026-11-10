@@ -5,6 +5,7 @@ import { fetchMyTickets } from '../api/events.js'
 import { ChatListSkeleton } from './LoadingSkeleton.jsx'
 import { useActivity } from '../context/ActivityContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
+import { useEventChat } from '../hooks/useEventChat.js'
 import { useNow } from '../hooks/useNow.js'
 import { formatDateTime, getChatStatus } from '../utils/format.js'
 
@@ -147,7 +148,7 @@ export default function FloatingEventChat() {
   async function sendMessage(formEvent) {
     formEvent.preventDefault()
     const content = messageText.trim()
-    if (!selectedRoom || selectedRoom.chat.state !== 'open' || !content) return
+    if (!selectedRoom || selectedRoom.chat.state !== 'open' || !content || sending) return
 
     try {
       const data = await apiPost(`/events/${encodeURIComponent(selectedRoom.id)}/messages`, { content })
@@ -267,9 +268,11 @@ export default function FloatingEventChat() {
                 {selectedRoom.chat.state === 'closed' && (
                   <p className="rounded-sm bg-ink/5 p-3 text-center text-sm text-muted">This event chat is closed.</p>
                 )}
-                {loadingMessages && <p className="text-center text-xs text-muted">Loading messages…</p>}
+                {loadingMessages && messages.length === 0 && (
+                  <p className="text-center text-xs text-muted">Loading messages…</p>
+                )}
                 {conversationError && <p role="alert" className="rounded-sm bg-accent/10 p-2 text-xs text-accent">{conversationError}</p>}
-                {!loadingMessages && visibleMessages.length === 0 && selectedRoom.chat.state === 'open' && (
+                {!loadingMessages && messages.length === 0 && selectedRoom.chat.state === 'open' && !conversationError && (
                   <p className="pt-8 text-center text-sm text-muted">No messages yet. Say hello to the group.</p>
                 )}
                 {visibleMessages.map((message) => (
@@ -284,21 +287,35 @@ export default function FloatingEventChat() {
               </div>
 
               {selectedRoom.chat.state === 'open' ? (
-                <form onSubmit={sendMessage} className="border-t border-line bg-white/80 p-3">
-                  <label className="sr-only" htmlFor="event-chat-message">Write a message</label>
-                  <div className="flex items-end gap-2">
-                    <textarea
-                      id="event-chat-message"
-                      className="input max-h-24 min-h-11 resize-y"
-                      rows={1}
-                      maxLength={1000}
-                      placeholder="Message this event group…"
-                      value={messageText}
-                      onChange={(event) => setMessageText(event.target.value)}
-                    />
-                    <button type="submit" className="btn btn-accent shrink-0 px-3 py-2.5" disabled={!messageText.trim()}>
-                      Send
-                    </button>
+                canChat ? (
+                  <form onSubmit={sendMessage} className="border-t border-line bg-white/80 p-3">
+                    <label className="sr-only" htmlFor="event-chat-message">Write a message</label>
+                    <div className="flex items-end gap-2">
+                      <textarea
+                        id="event-chat-message"
+                        className="input max-h-24 min-h-11 resize-y"
+                        rows={1}
+                        maxLength={1000}
+                        placeholder="Message this event group…"
+                        value={messageText}
+                        onChange={(event) => setMessageText(event.target.value)}
+                        disabled={sending}
+                      />
+                      <button
+                        type="submit"
+                        className="btn btn-accent shrink-0 px-3 py-2.5"
+                        disabled={!messageText.trim() || sending}
+                      >
+                        {sending ? 'Sending…' : 'Send'}
+                      </button>
+                    </div>
+                    <p className="mt-2 text-[10px] text-muted">
+                      Messages are visible to this event’s ticket holders and donors.
+                    </p>
+                  </form>
+                ) : (
+                  <div className="border-t border-line bg-white/80 p-4 text-center text-xs text-muted">
+                    {loadingMessages || !conversationError ? 'Connecting to chat…' : 'Messaging is unavailable.'}
                   </div>
                 </form>
               ) : (
