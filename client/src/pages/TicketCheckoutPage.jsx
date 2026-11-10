@@ -7,6 +7,7 @@ import { useAuth } from '../context/AuthContext.jsx'
 import { useEvents } from '../hooks/useEvents.js'
 import { formatDateTime, formatMoney } from '../utils/format.js'
 import TicketQrCode from '../components/TicketQrCode.jsx'
+import { googleCalendarUrl } from '../utils/calendar.js'
 
 const STEPS = [
   ['attendees', 'Attendee details'],
@@ -368,6 +369,14 @@ function CheckoutFlow({ id }) {
                 )
               })}
             </ul>
+            <a
+              href={googleCalendarUrl(event)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn btn-outline mt-6 inline-flex"
+            >
+              Add to Google Calendar
+            </a>
             <Link to={`/events/${event.id}`} className="btn btn-dark mt-6 inline-flex">
               Return to event
             </Link>

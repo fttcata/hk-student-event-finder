@@ -29,6 +29,12 @@ export function validateEventForm(form, bookedSeats = 0) {
   if (!form.date) errors.date = 'Pick a date and time.'
   else if (new Date(form.date) <= now) errors.date = 'The event must be in the future.'
 
+  if (!form.endDate) errors.endDate = 'Pick an end date and time.'
+  else if (Number.isNaN(new Date(form.endDate).getTime())) errors.endDate = 'Enter a valid end date and time.'
+  else if (form.date && new Date(form.endDate) <= new Date(form.date)) {
+    errors.endDate = 'The event must end after it starts.'
+  }
+
   if (form.type === 'fundraiser') {
     if (!(Number(form.goal) >= 100)) errors.goal = 'Fundraising goal must be at least HK$100.'
   } else {

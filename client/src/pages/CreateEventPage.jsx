@@ -16,6 +16,7 @@ const EMPTY_FORM = {
   description: '',
   category: 'Social',
   date: '',
+  endDate: '',
   location: '',
   capacity: '50',
   price: '0',
@@ -29,6 +30,7 @@ function toForm(event) {
     description: event.description,
     category: event.category,
     date: toDateTimeInput(event.date),
+    endDate: event.endDate ? toDateTimeInput(event.endDate) : '',
     location: event.location,
     capacity: String(event.capacity),
     price: String(event.price),
@@ -66,6 +68,7 @@ function EventForm({ existing, persisted = false }) {
       description: form.description.trim(),
       category: isFundraiser ? 'Charity' : form.category,
       date: new Date(form.date).toISOString(),
+      endDate: new Date(form.endDate).toISOString(),
       deadline: new Date(eventStart.getTime() - 2 * 60 * 60 * 1000).toISOString(),
       location: form.location.trim(),
       capacity: isFundraiser ? 0 : Number(form.capacity),
@@ -77,6 +80,7 @@ function EventForm({ existing, persisted = false }) {
         const response = await createEvent({
           ...eventData,
           event_type: form.type === 'fundraiser' ? 'fundraiser' : 'standard',
+          end_date: eventData.endDate,
           total_tickets: eventData.capacity,
           fundraiser_goal: eventData.goal,
         })
@@ -159,6 +163,17 @@ function EventForm({ existing, persisted = false }) {
             />
           </Field>
         </div>
+
+        <Field label="Ends" htmlFor="endDate" error={errors.endDate}>
+          <input
+            id="endDate"
+            name="endDate"
+            type="datetime-local"
+            className={inputClass('endDate')}
+            value={form.endDate}
+            onChange={handleChange}
+          />
+        </Field>
 
         {isFundraiser ? (
           <Field label="Fundraising goal (HK$)" htmlFor="goal" error={errors.goal}>

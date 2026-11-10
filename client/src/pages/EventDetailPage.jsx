@@ -6,7 +6,7 @@ import Receipt from '../components/Receipt.jsx'
 import TicketCounter from '../components/TicketCounter.jsx'
 import EventChatRoom from '../components/EventChatRoom.jsx'
 import FundraiserDonateModal from '../components/FundraiserDonateModal.jsx'
-import { cancelEvent, fetchEvent } from '../api/events.js'
+import { cancelEvent, fetchEvent, fetchMyTickets } from '../api/events.js'
 import { useActivity } from '../context/ActivityContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { useEvents } from '../hooks/useEvents.js'
@@ -18,6 +18,7 @@ import {
   getSafeExternalUrl,
   KIND_LABELS,
 } from '../utils/format.js'
+import { googleCalendarUrl } from '../utils/calendar.js'
 import NotFoundPage from './NotFoundPage.jsx'
 
 const QUICK_AMOUNTS = [20, 50, 100, 200]
@@ -208,9 +209,11 @@ function PledgePanel({ event }) {
 export default function EventDetailPage() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const { user } = useAuth()
-  const { bookmarks, toggleBookmark } = useActivity()
+  const { user, token } = useAuth()
+  const { bookings, bookmarks, toggleBookmark } = useActivity()
   const { events, loading } = useEvents()
+  const ownerKey = user && token ? String(user.id ?? user.email) : ''
+  const [ticketResult, setTicketResult] = useState({ ownerKey: '', eventIds: [], error: '' })
   const listedEvent = events.find((e) => e.id === id)
   const [detailResult, setDetailResult] = useState(null)
   const currentDetailResult = detailResult?.id === id ? detailResult : null
@@ -219,6 +222,34 @@ export default function EventDetailPage() {
   const detailLoading = !loading && !listedEvent && !currentDetailResult
   const [adminError, setAdminError] = useState('')
   const [canceling, setCanceling] = useState(false)
+
+  useEffect(() => {
+    if (!ownerKey) {
+      setTicketResult({ ownerKey: '', eventIds: [], error: '' })
+      return undefined
+    }
+
+    let active = true
+    fetchMyTickets()
+      .then((tickets) => {
+        if (active) {
+          setTicketResult({
+            ownerKey,
+            eventIds: tickets
+              .filter((ticket) => ticket.status === 'confirmed')
+              .map((ticket) => String(ticket.event.id)),
+            error: '',
+          })
+        }
+      })
+      .catch((requestError) => {
+        if (active) setTicketResult({ ownerKey, eventIds: [], error: requestError.message })
+      })
+
+    return () => {
+      active = false
+    }
+  }, [ownerKey, token])
 
   useEffect(() => {
     if (loading || listedEvent) return
@@ -299,6 +330,9 @@ export default function EventDetailPage() {
 
   const kind = getEventKind(event)
   const isSaved = bookmarks.includes(event.id)
+  const currentTicketResult = ticketResult.ownerKey === ownerKey ? ticketResult : null
+  const hasLocalBooking = bookings.some((booking) => String(booking.eventId) === event.id)
+  const hasJoined = hasLocalBooking || currentTicketResult?.eventIds.includes(event.id)
 
   function handleBookmark() {
     if (!user) return navigate('/login', { state: { from: `/events/${event.id}` } })
@@ -368,11 +402,26 @@ export default function EventDetailPage() {
         </section>
 
         <aside className="space-y-3 self-start lg:sticky lg:top-24">
+          {currentTicketResult?.error && !hasLocalBooking && (
+            <p role="alert" className="rounded-sm bg-peach/50 p-3 text-sm text-accent">
+              Unable to check your booking status: {currentTicketResult.error}
+            </p>
+          )}
           {event.status === 'cancelled' ? (
             <div className="panel text-sm text-muted">Registration and pledges are closed for this event.</div>
           ) : (
             <>
               {kind === 'fundraiser' ? <PledgePanel event={event} /> : <TicketPanel event={event} />}
+              {kind !== 'fundraiser' && hasJoined && (
+                <a
+                  href={googleCalendarUrl(event)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="btn btn-outline w-full"
+                >
+                  Add to Google Calendar
+                </a>
+              )}
               <button type="button" className="btn btn-outline w-full" onClick={handleBookmark}>
                 {isSaved ? '★ Saved to dashboard' : '☆ Save for later'}
               </button>

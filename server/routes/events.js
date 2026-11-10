@@ -388,6 +388,14 @@ async function parseEventInput(body, { allowPastDate = false } = {}) {
     return { error: 'The event must be in the future' }
   }
 
+  const endsAt = new Date(body.end_date)
+  if (typeof body.end_date !== 'string' || Number.isNaN(endsAt.getTime())) {
+    return { error: 'end_date must be a valid date' }
+  }
+  if (endsAt <= startsAt) {
+    return { error: 'end_date must be after date' }
+  }
+
   if (!EVENT_TYPES.includes(eventType)) {
     return { error: "event_type must be 'standard' or 'fundraiser'" }
   }
@@ -454,6 +462,7 @@ async function parseEventInput(body, { allowPastDate = false } = {}) {
       latitude: latitude.value,
       longitude: longitude.value,
       event_date: startsAt,
+      end_date: endsAt,
       // registration_deadline is computed, never taken from the client: exactly 2h before the start.
       registration_deadline: new Date(startsAt.getTime() - REGISTRATION_CLOSES_BEFORE_MS),
       event_type: eventType,
@@ -563,6 +572,7 @@ router.put('/:id', requireAuth, rejectExternalEvent, async (request, response) =
       latitude: row.latitude,
       longitude: row.longitude,
       date: row.event_date.toISOString(),
+      end_date: row.end_date?.toISOString() ?? null,
       type: row.event_type,
       total_tickets: row.capacity,
       price: row.price,
