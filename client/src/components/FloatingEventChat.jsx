@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { apiGet } from '../api/client.js'
+import { apiGet, apiPost } from '../api/client.js'
 import { fetchMyTickets } from '../api/events.js'
 import { ChatListSkeleton } from './LoadingSkeleton.jsx'
 import { useActivity } from '../context/ActivityContext.jsx'
@@ -67,7 +67,6 @@ export default function FloatingEventChat() {
   const [selectedRoomId, setSelectedRoomId] = useState(null)
   const [ticketResult, setTicketResult] = useState({ ownerKey: '', tickets: [], error: '' })
   const [messageResult, setMessageResult] = useState({ roomId: null, messages: [], error: '' })
-  const [demoMessages, setDemoMessages] = useState({})
   const [messageText, setMessageText] = useState('')
   const ownerKey = user ? String(user.id ?? user.email) : ''
 
@@ -75,7 +74,7 @@ export default function FloatingEventChat() {
     if (!ownerKey || !token) return undefined
 
     let active = true
-    fetchMyTickets()
+    const loadTickets = () => fetchMyTickets()
       .then((loadedTickets) => {
         if (active) setTicketResult({ ownerKey, tickets: loadedTickets, error: '' })
       })
@@ -88,9 +87,12 @@ export default function FloatingEventChat() {
           })
         }
       })
+    loadTickets()
+    window.addEventListener('campushub:ticket-booked', loadTickets)
 
     return () => {
       active = false
+      window.removeEventListener('campushub:ticket-booked', loadTickets)
     }
   }, [ownerKey, token])
 
@@ -110,7 +112,6 @@ export default function FloatingEventChat() {
   )
   const visibleMessages = [
     ...remoteMessages,
-    ...(selectedRoom ? demoMessages[selectedRoom.id] ?? [] : []),
   ]
 
   useEffect(() => {
@@ -143,23 +144,26 @@ export default function FloatingEventChat() {
 
   if (!user || !token) return null
 
-  function sendMessage(formEvent) {
+  async function sendMessage(formEvent) {
     formEvent.preventDefault()
     const content = messageText.trim()
     if (!selectedRoom || selectedRoom.chat.state !== 'open' || !content) return
 
-    const message = {
-      id: `demo-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      content,
-      user_name: user.name || 'You',
-      created_at: new Date().toISOString(),
-      is_demo: true,
+    try {
+      const data = await apiPost(`/events/${encodeURIComponent(selectedRoom.id)}/messages`, { content })
+      setMessageResult((current) => ({
+        roomId: selectedRoom.id,
+        messages: [...(current.roomId === selectedRoom.id ? current.messages : []), data.message],
+        error: '',
+      }))
+      setMessageText('')
+    } catch (error) {
+      setMessageResult((current) => ({
+        ...current,
+        roomId: selectedRoom.id,
+        error: `Unable to send message: ${error.message}`,
+      }))
     }
-    setDemoMessages((current) => ({
-      ...current,
-      [selectedRoom.id]: [...(current[selectedRoom.id] ?? []), message],
-    }))
-    setMessageText('')
   }
 
   return (
@@ -271,13 +275,10 @@ export default function FloatingEventChat() {
                 {visibleMessages.map((message) => (
                   <div
                     key={message.id}
-                    className={`max-w-[88%] rounded-lg px-3 py-2 text-sm ${
-                      message.is_demo ? 'ml-auto bg-ink text-paper' : 'mr-auto bg-white'
-                    }`}
+                    className="max-w-[88%] rounded-lg bg-white px-3 py-2 text-sm"
                   >
-                    {!message.is_demo && <p className="mb-1 text-xs font-semibold text-teal">{message.user_name || 'Student'}</p>}
+                    <p className="mb-1 text-xs font-semibold text-teal">{message.user_name || 'Student'}</p>
                     <p className="whitespace-pre-wrap break-words">{message.content}</p>
-                    {message.is_demo && <p className="mt-1 text-[10px] text-paper/70">Demo message · only visible here</p>}
                   </div>
                 ))}
               </div>
@@ -299,7 +300,6 @@ export default function FloatingEventChat() {
                       Send
                     </button>
                   </div>
-                  <p className="mt-2 text-[10px] text-muted">Demo messages are only visible in this browser session.</p>
                 </form>
               ) : (
                 <div className="border-t border-line bg-white/80 p-4 text-center text-xs text-muted">

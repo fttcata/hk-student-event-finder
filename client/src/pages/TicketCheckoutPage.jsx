@@ -6,6 +6,7 @@ import { useActivity } from '../context/ActivityContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { useEvents } from '../hooks/useEvents.js'
 import { formatDateTime, formatMoney } from '../utils/format.js'
+import TicketQrCode from '../components/TicketQrCode.jsx'
 
 const STEPS = [
   ['attendees', 'Attendee details'],
@@ -159,6 +160,7 @@ function CheckoutFlow({ id }) {
       if (isApiEvent) {
         const booking = await bookEventTickets(event.id, { attendees })
         setResult(booking)
+        window.dispatchEvent(new Event('campushub:ticket-booked'))
       } else {
         const booking = bookTicket(event, attendees)
         setResult({
@@ -354,6 +356,9 @@ function CheckoutFlow({ id }) {
                     <p className="font-semibold">{ticket.attendee_name}</p>
                     <p className="mt-1 text-sm text-muted">{ticket.attendee_email}</p>
                     <p className="mt-2 font-mono text-sm">Ticket: {ticket.reference_code}</p>
+                    <div className="mt-4">
+                      <TicketQrCode value={ticket.reference_code} />
+                    </div>
                     {emailStatus && (
                       <p className={`mt-2 text-xs ${emailStatus.sent ? 'text-teal' : 'text-accent'}`}>
                         {emailStatus.sent ? 'Confirmation email sent' : 'Email could not be sent; keep this ticket reference'}

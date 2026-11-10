@@ -20,3 +20,17 @@ export async function listEventMessages(eventId) {
   )
   return messages
 }
+
+export async function insertEventMessage({ eventId, userId, content }) {
+  const [result] = await pool.query(
+    `INSERT INTO chat_messages (event_id, user_id, content) VALUES (?, ?, ?)`,
+    [eventId, userId, content],
+  )
+  const [[message]] = await pool.query(
+    `SELECT m.id, m.user_id, u.name AS user_name, m.content, m.created_at
+     FROM chat_messages m JOIN users u ON u.id = m.user_id
+     WHERE m.id = ?`,
+    [result.insertId],
+  )
+  return message
+}
