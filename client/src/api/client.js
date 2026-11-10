@@ -1,5 +1,21 @@
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api'
 
+// The token lives in memory as well as localStorage. Reading it straight from localStorage
+// is not enough: `usePersistentState` only persists in an effect, and React flushes child
+// effects before parent effects, so a request fired by a child in the same commit as
+// `login()` (e.g. event chat rooms, profile tickets) would still see the old token.
+let authToken = readStoredToken()
+
+export function setAuthToken(token) {
+  authToken = token ?? ''
+  try {
+    if (authToken) localStorage.setItem('campushub:token', JSON.stringify(authToken))
+    else localStorage.removeItem('campushub:token')
+  } catch {
+    // Storage can be unavailable (private mode); the in-memory token still works.
+  }
+}
+
 export async function apiGet(path) {
   const response = await fetch(`${API_BASE_URL}${path}`, { headers: authHeaders() })
   if (!response.ok) throw await requestError(response)
@@ -39,13 +55,20 @@ async function requestError(response) {
 }
 
 function authHeaders() {
-  const storedToken = localStorage.getItem('campushub:token')
-  let token = storedToken
+  return authToken ? { Authorization: `Bearer ${authToken}` } : {}
+}
+
+function readStoredToken() {
   try {
-    token = storedToken ? JSON.parse(storedToken) : ''
+    const storedToken = localStorage.getItem('campushub:token')
+    if (!storedToken) return ''
+    try {
+      return JSON.parse(storedToken) || ''
+    } catch {
+      // Support tokens written by older builds as plain strings.
+      return storedToken
+    }
   } catch {
-    // Support tokens written by older builds as plain strings.
-    token = storedToken
+    return ''
   }
-  return token ? { Authorization: `Bearer ${token}` } : {}
 }
