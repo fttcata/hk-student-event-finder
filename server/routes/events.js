@@ -1,7 +1,7 @@
 import crypto from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { Router } from 'express'
-import { sendBookingSummary, sendDonationReceipt, sendTicketReceipt } from '../config/email.js'
+import { sendBookingSummary, sendDonationReceipt } from '../config/email.js'
 import { optionalAuth, requireAdmin, requireAuth } from '../middleware/auth.js'
 import { findCategoryById, findCategoryByName } from '../queries/categories.js'
 import { insertEventMessage, isChatMember, listEventMessages } from '../queries/chat.js'
@@ -735,36 +735,40 @@ function parseAttendees(body, buyerEmail) {
   return { emails }
 }
 
-// Sends receipts after the booking has committed. Called without awaiting so the HTTP response
-// is not held open by SMTP; every ticket outcome is still recorded in email_log.
+// Sends one summary after the booking has committed. Only the buyer receives this email;
+// it contains every ticket and QR code in the booking.
 async function sendBookingEmails({ buyer, event, tickets }) {
-  const sends = tickets.map((ticket) => sendTicketReceipt({ user: ticket.attendee, event, ticket }))
-  const buyerIsAttendee = tickets.some((ticket) => ticket.user_id === buyer.id)
-  if (!buyerIsAttendee) {
-    sends.push(sendBookingSummary({ user: buyer, event, tickets }))
+  const [result] = await Promise.allSettled([sendBookingSummary({ user: buyer, event, tickets })])
+  const sent = result.status === 'fulfilled'
+  if (!sent) {
+    console.error(
+      `Booking summary for ${tickets.map((ticket) => ticket.ticket_code).join(', ')} was not emailed: ${
+        result.reason?.message ?? result.reason
+      }`,
+    )
   }
-  const results = await Promise.allSettled(sends)
-  const ticketResults = results.slice(0, tickets.length)
-  results.forEach((result, index) => {
-    if (result.status === 'rejected') {
-      const label = tickets[index]?.ticket_code ?? 'booking summary'
-      console.error(`Ticket receipt ${label} was not emailed: ${result.reason?.message ?? result.reason}`)
-    }
-  })
-  await Promise.all(
-    tickets.map((ticket, index) =>
-      logEmail(ticket.user_id, 'booking', ticket.ticket_code, ticketResults[index].status === 'fulfilled'),
+
+  const logResults = await Promise.allSettled(
+    tickets.map((ticket) =>
+      logEmail(buyer.id, 'booking', ticket.ticket_code, sent),
     ),
   )
+  logResults.forEach((logResult, index) => {
+    if (logResult.status === 'rejected') {
+      console.error(`Booking email result for ${tickets[index].ticket_code} was not logged: ${logResult.reason?.message ?? logResult.reason}`)
+    }
+  })
+
   return tickets.map((ticket, index) => ({
     reference_code: ticket.ticket_code,
-    email: ticket.attendee.email,
-    sent: ticketResults[index].status === 'fulfilled',
+    email: buyer.email,
+    sent,
   }))
 }
 
 // Protected, verified students only (HANDOFF.md §1). Each attendee gets their own ticket row and
-// code; purchased_by records the buyer. Seats are a stored counter, so the capacity check,
+// code; purchased_by records the buyer. The buyer receives the only booking email. Seats are a
+// stored counter, so the capacity check,
 // decrement, and every insert/update run while the event row is locked.
 router.post('/:id/tickets', requireAuth, rejectExternalEvent, async (request, response) => {
   if (!request.user.is_verified) {
@@ -908,7 +912,7 @@ router.post('/:id/tickets', requireAuth, rejectExternalEvent, async (request, re
     console.error(`Booking emails for ${tickets.map((ticket) => ticket.ticket_code).join(', ')} failed: ${error.message}`)
     receiptEmails = tickets.map((ticket) => ({
       reference_code: ticket.ticket_code,
-      email: ticket.attendee.email,
+      email: request.user.email,
       sent: false,
     }))
   }

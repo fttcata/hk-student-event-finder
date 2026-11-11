@@ -1,23 +1,16 @@
-// Integration tests for GET /api/events/:id/messages against the running Docker stack
+﻿// Integration tests for GET /api/events/:id/messages against the running Docker stack
 // (`docker compose up`). Users register through the API; events, tickets, pledges and messages
-// are written straight to PostgreSQL because the API only accepts future event dates.
-// Run with `npm test --prefix server`. TEST_API_URL / TEST_DATABASE_URL override the defaults.
+// are written straight to MySQL because the API only accepts future event dates.
+// Run with `npm test --prefix server`. TEST_API_URL / TEST_DB_* override the defaults.
 import assert from 'node:assert/strict'
 import crypto from 'node:crypto'
 import { after, before, describe, test } from 'node:test'
-import pg from 'pg'
+import mysql from 'mysql2/promise'
 import { io as createSocketClient } from 'socket.io-client'
 
-const { Client, types } = pg
-
-// BIGINT columns come back as strings by default; the API returns numbers.
-types.setTypeParser(20, Number.parseInt)
 
 const API = process.env.TEST_API_URL || 'http://localhost:5000/api'
 const API_ORIGIN = new URL(API).origin
-const DATABASE_URL =
-  process.env.TEST_DATABASE_URL ||
-  'postgresql://app_user:app_password@127.0.0.1:5432/student_events'
 const RUN = crypto.randomBytes(4).toString('hex')
 const EMAIL_DOMAIN = 'connect.hku.hk'
 const RUN_AT = Date.now()
@@ -28,11 +21,13 @@ function utcTimestamp(offsetMs = 0) {
   return new Date(RUN_AT + offsetMs).toISOString().slice(0, 23).replace('T', ' ')
 }
 
-const db = new Client({
-  connectionString: DATABASE_URL,
-  ssl: process.env.TEST_DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
+const db = await mysql.createConnection({
+  host: process.env.TEST_DB_HOST || process.env.DB_HOST || '127.0.0.1',
+  port: Number(process.env.TEST_DB_PORT || process.env.DB_PORT || 3307),
+  database: process.env.TEST_DB_NAME || process.env.DB_NAME || 'student_events',
+  user: process.env.TEST_DB_USER || process.env.DB_USER || 'app_user',
+  password: process.env.TEST_DB_PASSWORD || process.env.DB_PASSWORD || 'app_password',
 })
-await db.connect()
 
 async function getMessages(eventId, token) {
   const headers = token ? { Authorization: `Bearer ${token}` } : {}
@@ -115,35 +110,30 @@ async function register(label, { verified = true } = {}) {
   })
   assert.equal(response.status, 201, `registering ${label}`)
   const { token, user } = await response.json()
-  if (verified) await db.query('UPDATE users SET is_verified = TRUE WHERE id = $1', [user.id])
+  if (verified) await db.query('UPDATE users SET is_verified = TRUE WHERE id = ?', [user.id])
   return { token, id: user.id, name: user.name }
 }
 
 async function insertEvent(organizerId, { type = 'standard', startsAt = utcTimestamp(-60 * 60 * 1000) } = {}) {
-  const {
-    rows: [{ id: categoryId }],
-  } = await db.query('SELECT id FROM categories ORDER BY id LIMIT 1')
-  const {
-    rows: [{ id }],
-  } = await db.query(
+  const [[{ id: categoryId }]] = await db.query('SELECT id FROM categories ORDER BY id LIMIT 1')
+  const [result] = await db.query(
     `INSERT INTO events (title, description, category_id, organizer_id, location, event_date,
                          event_type, capacity, available_tickets, price, goal_amount, status)
-     VALUES ($1, 'Chat test event', $2, $3, 'Test Hall', $4::timestamp, $5, 10, 10, 0, $6, 'published')
-     RETURNING id`,
+     VALUES (?, 'Chat test event', ?, ?, 'Test Hall', ?, ?, 10, 10, 0, ?, 'published')`,
     [`Chat Test ${RUN}`, categoryId, organizerId, startsAt, type, type === 'fundraiser' ? 500 : null],
   )
-  return id
+  return result.insertId
 }
 
 async function setEventDate(eventId, startsAt) {
-  await db.query('UPDATE events SET event_date = $1::timestamp WHERE id = $2', [startsAt, eventId])
+  await db.query('UPDATE events SET event_date = ? WHERE id = ?', [startsAt, eventId])
 }
 
 async function insertTicket(eventId, holder, { buyer = holder, status = 'confirmed' } = {}) {
   await db.query(
     `INSERT INTO tickets
        (user_id, purchased_by, event_id, attendee_name, attendee_email, status, ticket_code)
-     VALUES ($1, $2, $3, $4, 'attendee@test.local', $5, gen_random_uuid())`,
+     VALUES (?, ?, ?, ?, 'attendee@test.local', ?, UUID())`,
     [holder.id, buyer.id, eventId, holder.name, status],
   )
 }
@@ -151,7 +141,7 @@ async function insertTicket(eventId, holder, { buyer = holder, status = 'confirm
 async function insertMessage(eventId, user, content, createdAt) {
   await db.query(
     `INSERT INTO chat_messages (event_id, user_id, content, created_at)
-     VALUES ($1, $2, $3, $4::timestamp)`,
+     VALUES (?, ?, ?, ?)`,
     [eventId, user.id, content, createdAt],
   )
 }
@@ -180,7 +170,7 @@ before(async () => {
   await insertTicket(eventId, users.guest, { buyer: users.buyer })
   await insertTicket(otherEventId, users.outsider)
   await db.query(
-    `INSERT INTO pledges (event_id, user_id, amount, reference_code) VALUES ($1, $2, 25, $3)`,
+    `INSERT INTO pledges (event_id, user_id, amount, reference_code) VALUES (?, ?, 25, ?)`,
     [fundraiserId, users.donor.id, `T${RUN}`.toUpperCase()],
   )
 
@@ -196,12 +186,12 @@ after(async () => {
   const events = [eventId, fundraiserId, otherEventId].filter(Boolean)
   const ids = Object.values(users).map((user) => user.id)
   if (events.length) {
-    await db.query('DELETE FROM chat_messages WHERE event_id = ANY($1::bigint[])', [events])
-    await db.query('DELETE FROM tickets WHERE event_id = ANY($1::bigint[])', [events])
-    await db.query('DELETE FROM pledges WHERE event_id = ANY($1::bigint[])', [events])
-    await db.query('DELETE FROM events WHERE id = ANY($1::bigint[])', [events])
+    await db.query('DELETE FROM chat_messages WHERE event_id = IN (?)', [events])
+    await db.query('DELETE FROM tickets WHERE event_id = IN (?)', [events])
+    await db.query('DELETE FROM pledges WHERE event_id = IN (?)', [events])
+    await db.query('DELETE FROM events WHERE id = IN (?)', [events])
   }
-  if (ids.length) await db.query('DELETE FROM users WHERE id = ANY($1::bigint[])', [ids])
+  if (ids.length) await db.query('DELETE FROM users WHERE id = IN (?)', [ids])
   await db.end()
 })
 
@@ -324,13 +314,13 @@ describe('GET /api/events/:id/messages', () => {
 
     test('403 once the event is cancelled, even inside the window', async () => {
       await setEventDate(eventId, utcTimestamp(-60 * 60 * 1000))
-      await db.query("UPDATE events SET status = 'cancelled' WHERE id = $1", [eventId])
+      await db.query("UPDATE events SET status = 'cancelled' WHERE id = ?", [eventId])
       try {
         const { status, body } = await getMessages(eventId, users.holder.token)
         assert.equal(status, 403)
         assert.match(body.error, /cancelled/)
       } finally {
-        await db.query("UPDATE events SET status = 'published' WHERE id = $1", [eventId])
+        await db.query("UPDATE events SET status = 'published' WHERE id = ?", [eventId])
       }
     })
   })

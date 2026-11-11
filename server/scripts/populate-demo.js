@@ -605,7 +605,7 @@ try {
   console.log(`  demo.student@connect.hku.hk / ${DEMO_PASSWORD}   (student dashboard, tickets, pledge)`)
   console.log(`  hku.careers@connect.hku.hk  / ${DEMO_PASSWORD}   (organizer of the HKU Careers Fair)`)
   console.log('')
-  console.log('Mock email inbox: http://localhost:8025 (Mailpit). Restart the server after changing SMTP settings.')
+  console.log('Email delivery: Mailtrap sandbox SMTP. Restart the server after changing SMTP settings.')
   if (!RESET) console.log('Re-run with --reset to rebuild the demo events with fresh dates.')
 } catch (error) {
   if (connection) await connection.rollback()
