@@ -146,6 +146,15 @@ export async function deleteAllCedarsEvents() {
   return apiDelete('/events/admin/cedars')
 }
 
+export async function fetchAdminUsers() {
+  const data = await apiGet('/users/admin')
+  return data.users
+}
+
+export async function deleteAdminUser(id) {
+  return apiDelete(`/users/admin/${encodeURIComponent(id)}`)
+}
+
 export async function bookEventTickets(id, { attendees }) {
   const data = await apiPost(`/events/${encodeURIComponent(id)}/tickets`, {
     quantity: attendees.length,

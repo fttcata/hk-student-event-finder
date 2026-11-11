@@ -186,12 +186,12 @@ after(async () => {
   const events = [eventId, fundraiserId, otherEventId].filter(Boolean)
   const ids = Object.values(users).map((user) => user.id)
   if (events.length) {
-    await db.query('DELETE FROM chat_messages WHERE event_id = IN (?)', [events])
-    await db.query('DELETE FROM tickets WHERE event_id = IN (?)', [events])
-    await db.query('DELETE FROM pledges WHERE event_id = IN (?)', [events])
-    await db.query('DELETE FROM events WHERE id = IN (?)', [events])
+    await db.query('DELETE FROM chat_messages WHERE event_id IN (?)', [events])
+    await db.query('DELETE FROM tickets WHERE event_id IN (?)', [events])
+    await db.query('DELETE FROM pledges WHERE event_id IN (?)', [events])
+    await db.query('DELETE FROM events WHERE id IN (?)', [events])
   }
-  if (ids.length) await db.query('DELETE FROM users WHERE id = IN (?)', [ids])
+  if (ids.length) await db.query('DELETE FROM users WHERE id IN (?)', [ids])
   await db.end()
 })
 

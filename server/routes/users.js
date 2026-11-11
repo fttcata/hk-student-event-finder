@@ -1,8 +1,33 @@
 import { Router } from 'express'
-import { requireAuth } from '../middleware/auth.js'
+import { requireAdmin, requireAuth } from '../middleware/auth.js'
 import { listTicketRowsForUser } from '../queries/tickets.js'
+import { deleteUserForAdmin, listUsersForAdmin } from '../queries/users.js'
 
 const router = Router()
+
+router.get('/admin', requireAdmin, async (_request, response) => {
+  const users = await listUsersForAdmin()
+  return response.status(200).json({ users })
+})
+
+router.delete('/admin/:id', requireAdmin, async (request, response) => {
+  const userId = Number(request.params.id)
+  if (!Number.isInteger(userId) || userId < 1) {
+    return response.status(400).json({ error: 'User id must be a positive integer' })
+  }
+
+  const result = await deleteUserForAdmin(userId, request.user.id)
+  if (result.status === 'not_found') return response.status(404).json({ error: 'User not found' })
+  if (result.status === 'self') return response.status(409).json({ error: 'You cannot delete your own administrator account' })
+  if (result.status === 'admin') return response.status(409).json({ error: 'Administrator accounts cannot be deleted here' })
+  if (result.status === 'owns_events') {
+    return response.status(409).json({ error: 'This account owns events. Cancel or reassign its events before deleting the account.' })
+  }
+  if (result.status === 'bought_for_others') {
+    return response.status(409).json({ error: 'This account purchased tickets for other attendees and cannot be deleted yet.' })
+  }
+  return response.status(204).send()
+})
 
 // The signed-in student's tickets, soonest event first. Cancelled tickets are included
 // (they are receipts, HANDOFF.md §1) and carry status 'cancelled'.

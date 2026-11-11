@@ -17,8 +17,8 @@ services:
     build:
       context: ./server
       dockerfile: Dockerfile
-    # server/.env is optional local configuration. SMTP credentials should be supplied through
-    # shell variables or a root .env file and are never committed.
+    # server/.env is optional local configuration. SMTP settings are loaded from that file and
+    # are never committed.
     env_file:
       - path: ./server/.env
         required: false
@@ -32,12 +32,6 @@ services:
       DB_PASSWORD: app_password
       JWT_SECRET: dev_only_jwt_secret_change_in_production
       JWT_EXPIRES_IN: 1d
-      SMTP_HOST: ${SMTP_HOST:-sandbox.smtp.mailtrap.io}
-      SMTP_PORT: ${SMTP_PORT:-2525}
-      SMTP_SECURE: ${SMTP_SECURE:-false}
-      SMTP_USER: ${SMTP_USER:-}
-      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
-      SMTP_FROM: ${SMTP_FROM:-no-reply@campushub.local}
     depends_on:
       mysql:
         condition: service_started

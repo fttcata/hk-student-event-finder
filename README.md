@@ -53,20 +53,17 @@ DB_HOST=127.0.0.1 DB_PORT=3307 npm run admin:promote -- your-verified-account@ex
 ```
 
 Log out and sign in again after promotion. Admins can manage published
-events from the Admin link; cancelling an event keeps its tickets and pledges as records.
+events and delete eligible student accounts from the Admin link. Cancelling an event keeps its
+tickets and pledges as records. Accounts owning events or tickets purchased for other attendees
+must be handled before they can be deleted.
 
 The database credentials in `server/.env.example` match `docker-compose.yml` for local development only. Do not use them in production.
 
-Email receipts use the **Mailtrap Email Sandbox**. Create a root `.env` file with your Mailtrap
-credentials before starting Compose:
+Email receipts use the **Mailtrap Email Sandbox**. Copy `server/.env.example` to `server/.env`,
+then add your Mailtrap credentials before starting Compose:
 
 ```sh
-SMTP_HOST=sandbox.smtp.mailtrap.io
-SMTP_PORT=2525
-SMTP_SECURE=false
-SMTP_USER=your-mailtrap-username
-SMTP_PASSWORD=your-mailtrap-password
-SMTP_FROM=no-reply@campushub.local
+cp server/.env.example server/.env
 ```
 
 On startup the server logs `SMTP ready (sandbox.smtp.mailtrap.io:2525)` when the connection succeeds.
@@ -96,8 +93,9 @@ values to your Mailtrap sandbox credentials. The server explicitly loads `server
 started from the repository root.
 
 Ticket checkout collects a name and email address for each attendee. Each ticket is stored with its
-attendee details and its own reference code, and confirmation is sent to that attendee when SMTP is
-configured. After updating an existing MySQL volume, run this migration once from the repository root:
+attendee details and its own reference code. When SMTP is configured, only the buyer receives one
+confirmation containing all ticket QR codes. After updating an existing MySQL volume, run this
+migration once from the repository root:
 
 ```sh
 DB_HOST=127.0.0.1 DB_PORT=3307 DB_NAME=student_events DB_USER=app_user DB_PASSWORD=app_password \
