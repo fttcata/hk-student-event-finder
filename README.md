@@ -68,10 +68,28 @@ cp server/.env.example server/.env
 
 On startup the server logs `SMTP ready (sandbox.smtp.mailtrap.io:2525)` when the connection succeeds.
 
-### Demo data (presentation prep)
+### Demo data (pre-loaded on first boot)
 
-With the stack running, seed realistic Hong Kong university events (free, paid, sold out, and fundraisers
-with live goal progress):
+`database/init.sql` seeds the database the first time the MySQL volume is created, so
+`docker compose up --build` on a fresh machine opens on realistic Hong Kong university events (free,
+paid, sold out, and fundraisers with live goal progress). Event dates are computed from the moment the
+database boots, so they are always upcoming. To start over from the seed:
+
+```sh
+docker compose down -v          # deletes the MySQL volume and all its data
+docker compose up --build
+```
+
+The seed creates 8 organizer accounts, 160 student accounts, ~770 confirmed tickets, 100 pledges, chat
+messages and bookmarks. Every account uses the password `Demo1234!` (the client only accepts
+HKU/CUHK/PolyU domains):
+
+- `demo.student@connect.hku.hk` — student dashboard with a ticket for every event and a pledge to every fundraiser
+- `hku.careers@connect.hku.hk` — organizer of the HKU Careers Fair (starts ~5 hours after boot, so its chat room is open)
+- `admin@connect.hku.hk` — administrator (admin events page, user management)
+- `pending@connect.hku.hk` — unverified student; verification code `VRF7K3M2Q9P4XN8D`
+
+To refresh the demo dates on a database that is already running without wiping it:
 
 ```sh
 cd server
@@ -81,12 +99,6 @@ npm run db:populate-demo -- --reset  # rebuild the demo events with fresh dates
 
 `--reset` also cancels app events whose date has already passed, so the listing opens on upcoming
 events instead of leftovers from an earlier seed.
-
-The script creates 8 organizer accounts, 160 student accounts, confirmed tickets, pledges, chat messages
-and bookmarks. Demo logins (the client only accepts HKU/CUHK/PolyU domains):
-
-- `demo.student@connect.hku.hk` / `Demo1234!` — student dashboard with tickets and a donation
-- `hku.careers@connect.hku.hk` / `Demo1234!` — organizer of the HKU Careers Fair
 
 For non-Docker development, copy `server/.env.example` to `server/.env` and set its `SMTP_*`
 values to your Mailtrap sandbox credentials. The server explicitly loads `server/.env` even when
