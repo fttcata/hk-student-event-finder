@@ -8,6 +8,22 @@ export async function lockUserTicket(connection, userId, eventId) {
   return ticket ?? null
 }
 
+export async function lockTicketByCodeForEvent(connection, eventId, ticketCode) {
+  const [[ticket]] = await connection.query(
+    `SELECT id, user_id, purchased_by, event_id, attendee_name, attendee_email, type, status,
+            ticket_code, amount_paid, created_at, checked_in_at
+     FROM tickets
+     WHERE event_id = ? AND ticket_code = ?
+     FOR UPDATE`,
+    [eventId, ticketCode],
+  )
+  return ticket ?? null
+}
+
+export async function markTicketCheckedIn(connection, ticketId, checkedInAt) {
+  await connection.query('UPDATE tickets SET checked_in_at = ? WHERE id = ?', [checkedInAt, ticketId])
+}
+
 export async function lockTicketsForUsers(connection, eventId, userIds) {
   const [tickets] = await connection.query(
     `SELECT id, user_id, status FROM tickets WHERE event_id = ? AND user_id IN (?) FOR UPDATE`,

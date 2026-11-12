@@ -177,3 +177,7 @@ export async function bookEventTickets(id, { attendees }) {
   })
   return data
 }
+
+export async function checkInTicket(id, ticketCode) {
+  return apiPost(`/events/${encodeURIComponent(id)}/check-in`, { ticket_code: ticketCode })
+}

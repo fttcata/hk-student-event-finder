@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { fetchMyTickets } from '../api/events.js';
+import TicketQrCode from '../components/TicketQrCode.jsx';
 import { formatDateTime, formatMoney } from '../utils/format.js';
 
 export default function Profile() {
@@ -46,6 +47,12 @@ export default function Profile() {
             <p><strong>Attendee:</strong> {ticket.attendee_name} · {ticket.attendee_email}</p>
             <p><strong>Unique code:</strong> {ticket.reference_code}</p>
             <p><strong>Price paid:</strong> {formatMoney(ticket.amount_paid)}</p>
+            <p><strong>Status:</strong> {ticket.status}</p>
+            {ticket.status === 'confirmed' && (
+              <div style={{ marginTop: '0.75rem' }}>
+                <TicketQrCode value={ticket.reference_code} />
+              </div>
+            )}
           </article>
         ))}
       </section>

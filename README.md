@@ -112,7 +112,13 @@ migration once from the repository root:
 ```sh
 DB_HOST=127.0.0.1 DB_PORT=3307 DB_NAME=student_events DB_USER=app_user DB_PASSWORD=app_password \
   npm run db:migrate-ticket-attendees --prefix server
+DB_HOST=127.0.0.1 DB_PORT=3307 DB_NAME=student_events DB_USER=app_user DB_PASSWORD=app_password \
+  npm run db:migrate-ticket-checkin --prefix server
 ```
 
-The migration backfills existing tickets from their purchaser accounts and can be safely rerun.
-Fresh databases get the attendee fields from `database/init.sql`.
+The migrations backfill existing tickets from their purchaser accounts and add the check-in timestamp;
+both can be safely rerun. Fresh databases get these fields from `database/init.sql`.
+
+Event organizers and administrators can open the ticket scanner from the event page, dashboard, or
+admin event list. Camera access requires a secure context: use `http://localhost` during development,
+or HTTPS when opening the site from another device on the network.

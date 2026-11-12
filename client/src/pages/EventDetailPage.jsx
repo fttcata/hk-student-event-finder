@@ -360,6 +360,13 @@ export default function EventDetailPage() {
   const currentTicketResult = ticketResult.ownerKey === ownerKey ? ticketResult : null
   const hasLocalBooking = bookings.some((booking) => String(booking.eventId) === event.id)
   const hasJoined = hasLocalBooking || currentTicketResult?.eventIds.includes(event.id)
+  const canCheckIn =
+    user &&
+    /^\d+$/.test(event.id) &&
+    !event.isScraped &&
+    kind !== 'fundraiser' &&
+    event.status !== 'cancelled' &&
+    (user.role === 'admin' || String(event.organizerId) === String(user.id))
 
   function handleBookmark() {
     if (!user) return navigate('/login', { state: { from: `/events/${event.id}` } })
@@ -453,6 +460,11 @@ export default function EventDetailPage() {
                 {isSaved ? '★ Saved to dashboard' : '☆ Save for later'}
               </button>
             </>
+          )}
+          {canCheckIn && (
+            <Link to={`/events/${event.id}/check-in`} className="btn btn-accent w-full">
+              Scan tickets
+            </Link>
           )}
           {user?.role === 'admin' && (
             <section className="panel space-y-3" aria-label="Administrator controls">
