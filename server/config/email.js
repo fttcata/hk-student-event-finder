@@ -1,6 +1,9 @@
 import nodemailer from 'nodemailer'
 import QRCode from 'qrcode'
+import { generateTicketEmailHTML } from '../utils/emailTemplates.js'
 import { generateBookingSummaryEmailHTML } from '../utils/emailTemplates.js'
+
+const TICKET_QR_CID = 'ticket-qr@campushub'
 
 const smtpConfigured = Boolean(
   process.env.SMTP_HOST && process.env.SMTP_PORT && process.env.SMTP_USER && process.env.SMTP_PASSWORD,
@@ -86,6 +89,50 @@ export async function sendDonationReceipt({ user, event, pledge }) {
   })
 }
 
+// Throws when SMTP is not configured or the send fails; callers record the outcome in email_log.
+export async function sendTicketReceipt({ user, event, ticket }) {
+  if (!transporter) throw new Error('SMTP is not configured')
+
+  const amount = `HK$${Number(ticket.amount_paid).toFixed(2)}`
+  const qrCode = await QRCode.toBuffer(ticket.ticket_code, { margin: 1, width: 220 })
+  return transporter.sendMail({
+    from: FROM,
+    to: user.email,
+    subject: `Ticket confirmed ${ticket.ticket_code} — ${event.title}`,
+    html: generateTicketEmailHTML(
+      user.name,
+      event.title,
+      ticket.ticket_code,
+      ticket.amount_paid,
+      new Date(event.date).toISOString(),
+      TICKET_QR_CID,
+    ),
+    attachments: [
+      {
+        filename: 'ticket-qr.png',
+        content: qrCode,
+        cid: TICKET_QR_CID,
+      },
+    ],
+    text: [
+      `Hi ${user.name},`,
+      '',
+      `Your ticket for "${event.title}" is confirmed.`,
+      '',
+      `Ticket code: ${ticket.ticket_code}`,
+      `Type: ${ticket.type}`,
+      `Date: ${new Date(event.date).toISOString()}`,
+      `Location: ${event.location}`,
+      `Amount paid: ${amount}`,
+      '',
+      'Show this email (or the ticket code) at the entrance.',
+      '— Campus Hub',
+    ].join('\n'),
+  })
+}
+
+// Sent to the buyer when they book seats for other students. Each attendee still gets their own
+// ticket receipt above; this message is the buyer's record of the whole purchase.
 // Sent only to the buyer for every booking; the message contains every ticket QR code.
 export async function sendBookingSummary({ user, event, tickets }) {
   if (!transporter) throw new Error('SMTP is not configured')
