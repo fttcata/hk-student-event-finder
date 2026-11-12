@@ -77,6 +77,7 @@ erDiagram
         varchar ticket_code UK "UUID"
         decimal amount_paid
         timestamp created_at
+        datetime checked_in_at "NULL until scanned"
     }
 
     pledges {

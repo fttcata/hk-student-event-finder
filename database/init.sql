@@ -86,6 +86,7 @@ CREATE TABLE IF NOT EXISTS tickets (
   ticket_code VARCHAR(36) NOT NULL,
   amount_paid DECIMAL(8,2) NOT NULL DEFAULT 0.00,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  checked_in_at DATETIME NULL,
   PRIMARY KEY (id),
   UNIQUE KEY uq_tickets_user_event (user_id, event_id),
   UNIQUE KEY uq_tickets_code (ticket_code),
@@ -234,29 +235,30 @@ SELECT 'Food Bank Drive 2026', 'Raise funds for the HK Food Bank. Every pledge c
 FROM categories c, users u WHERE c.name = 'Charity' AND u.email = 'organizer@hkstu.edu'
 AND NOT EXISTS (SELECT 1 FROM events e WHERE e.title = 'Food Bank Drive 2026');
 
-INSERT INTO tickets (user_id, purchased_by, event_id, type, status, ticket_code, amount_paid)
-SELECT u.id, u.id, e.id, 'free', 'confirmed', '11111111-1111-4111-8111-111111111111', 0.00
+INSERT INTO tickets (user_id, purchased_by, event_id, attendee_name, attendee_email, type, status, ticket_code, amount_paid)
+SELECT u.id, u.id, e.id, u.name, u.email, 'free', 'confirmed', '11111111-1111-4111-8111-111111111111', 0.00
 FROM users u, events e
 WHERE u.email = 'student@hkstu.edu' AND e.title = 'Campus Innovation Night'
 AND NOT EXISTS (SELECT 1 FROM tickets t WHERE t.user_id = u.id AND t.event_id = e.id);
 
-INSERT INTO tickets (user_id, purchased_by, event_id, type, status, ticket_code, amount_paid)
-SELECT u.id, u.id, e.id, 'paid', 'confirmed', '22222222-2222-4222-8222-222222222222', 20.00
+INSERT INTO tickets (user_id, purchased_by, event_id, attendee_name, attendee_email, type, status, ticket_code, amount_paid)
+SELECT u.id, u.id, e.id, u.name, u.email, 'paid', 'confirmed', '22222222-2222-4222-8222-222222222222', 20.00
 FROM users u, events e
 WHERE u.email = 'student@hkstu.edu' AND e.title = 'International Food Fair'
 AND NOT EXISTS (SELECT 1 FROM tickets t WHERE t.user_id = u.id AND t.event_id = e.id);
 
-INSERT INTO tickets (user_id, purchased_by, event_id, type, status, ticket_code, amount_paid)
-SELECT u.id, u.id, e.id, 'free', 'cancelled', '33333333-3333-4333-8333-333333333333', 0.00
+INSERT INTO tickets (user_id, purchased_by, event_id, attendee_name, attendee_email, type, status, ticket_code, amount_paid)
+SELECT u.id, u.id, e.id, u.name, u.email, 'free', 'cancelled', '33333333-3333-4333-8333-333333333333', 0.00
 FROM users u, events e
 WHERE u.email = 'student@hkstu.edu' AND e.title = 'Design Portfolio Workshop'
 AND NOT EXISTS (SELECT 1 FROM tickets t WHERE t.user_id = u.id AND t.event_id = e.id);
 
 -- Every organizer holds a free ticket to their own event (it does not take a seat).
 -- Also works as a backfill: run it once against a database created before this rule.
-INSERT INTO tickets (user_id, purchased_by, event_id, type, status, ticket_code, amount_paid)
-SELECT e.organizer_id, e.organizer_id, e.id, 'free', 'confirmed', UUID(), 0.00
+INSERT INTO tickets (user_id, purchased_by, event_id, attendee_name, attendee_email, type, status, ticket_code, amount_paid)
+SELECT e.organizer_id, e.organizer_id, e.id, u.name, u.email, 'free', 'confirmed', UUID(), 0.00
 FROM events e
+JOIN users u ON u.id = e.organizer_id
 WHERE NOT EXISTS (SELECT 1 FROM tickets t WHERE t.user_id = e.organizer_id AND t.event_id = e.id);
 
 -- Derive the stored counter from the seed tickets (confirmed seats only).

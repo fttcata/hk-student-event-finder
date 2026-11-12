@@ -170,6 +170,11 @@ export default function AdminEventsPage() {
                     </button>
                   ) : event.status !== 'cancelled' && (
                     <>
+                      {kind !== 'fundraiser' && /^\d+$/.test(event.id) && (
+                        <Link to={`/events/${event.id}/check-in`} className="btn btn-accent py-2">
+                          Scan
+                        </Link>
+                      )}
                       <Link to={`/events/${event.id}/edit`} className="btn btn-dark py-2">
                         Edit
                       </Link>

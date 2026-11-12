@@ -27,8 +27,10 @@ import {
   cancelTicket,
   insertTicket,
   listTicketsByCodes,
+  lockTicketByCodeForEvent,
   lockTicketsForUsers,
   lockUserTicket,
+  markTicketCheckedIn,
   reconfirmTicket,
 } from '../queries/tickets.js'
 import { withTransaction } from '../queries/transaction.js'
@@ -46,6 +48,7 @@ const DEFAULT_LIMIT = 12
 const MAX_LIMIT = 50
 const MAX_TICKET_QUANTITY = 4
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+const TICKET_CODE_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 // Organizer contact details (email, student ID) are only shown to signed-in viewers.
 function serializeOrganizer(row, viewer) {
@@ -914,6 +917,62 @@ router.post('/:id/tickets', requireAuth, rejectExternalEvent, async (request, re
   }
 
   return response.status(201).json({ tickets, ticket: tickets[0], event, receipt_emails: receiptEmails })
+})
+
+router.post('/:id/check-in', requireAuth, async (request, response) => {
+  const rawTicketCode = request.body?.ticket_code
+  const ticketCode = typeof rawTicketCode === 'string' ? rawTicketCode.trim().toLowerCase() : ''
+  if (!TICKET_CODE_PATTERN.test(ticketCode)) {
+    return response.status(400).json({ error: 'ticket_code must be a valid ticket UUID' })
+  }
+
+  let result
+  const earlyResponse = await withTransaction(async (connection) => {
+    const { row, status, error } = await findOwnedEvent(connection, request.params.id, request.user)
+    if (error) return { status, body: { error } }
+    if (row.status === 'cancelled') {
+      return { status: 409, body: { error: 'This event has been cancelled' } }
+    }
+    if (row.source) {
+      return { status: 409, body: { error: 'This event does not use Campus Hub tickets' } }
+    }
+    if (row.event_type !== 'standard') {
+      return { status: 409, body: { error: 'Check-in is only available for standard events' } }
+    }
+
+    const ticket = await lockTicketByCodeForEvent(connection, row.id, ticketCode)
+    if (!ticket) {
+      return { status: 404, body: { error: 'Ticket not found for this event' } }
+    }
+    if (ticket.status !== 'confirmed') {
+      return { status: 409, body: { error: 'This ticket has been cancelled' } }
+    }
+
+    const alreadyCheckedIn = ticket.checked_in_at !== null
+    let checkedInAt = ticket.checked_in_at
+    if (!alreadyCheckedIn) {
+      checkedInAt = new Date()
+      checkedInAt.setMilliseconds(0)
+      await markTicketCheckedIn(connection, ticket.id, checkedInAt)
+    }
+
+    result = {
+      check_in: {
+        ticket_code: ticket.ticket_code,
+        attendee_name: ticket.attendee_name,
+        attendee_email: ticket.attendee_email,
+        type: ticket.type,
+        status: ticket.status,
+        amount_paid: ticket.amount_paid,
+        checked_in_at: checkedInAt,
+        already_checked_in: alreadyCheckedIn,
+      },
+    }
+    return null
+  })
+
+  if (earlyResponse) return response.status(earlyResponse.status).json(earlyResponse.body)
+  return response.status(200).json(result)
 })
 
 // Protected. Cancelling releases the seat and restores the stored counter; the row stays as a

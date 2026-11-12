@@ -1,5 +1,8 @@
 import nodemailer from 'nodemailer'
+import QRCode from 'qrcode'
 import { generateTicketEmailHTML } from '../utils/emailTemplates.js'
+
+const TICKET_QR_CID = 'ticket-qr@campushub'
 
 const smtpConfigured = Boolean(
   process.env.SMTP_HOST && process.env.SMTP_PORT && process.env.SMTP_USER && process.env.SMTP_PASSWORD,
@@ -90,11 +93,26 @@ export async function sendTicketReceipt({ user, event, ticket }) {
   if (!transporter) throw new Error('SMTP is not configured')
 
   const amount = `HK$${Number(ticket.amount_paid).toFixed(2)}`
+  const qrCode = await QRCode.toBuffer(ticket.ticket_code, { margin: 1, width: 220 })
   return transporter.sendMail({
     from: FROM,
     to: user.email,
     subject: `Ticket confirmed ${ticket.ticket_code} — ${event.title}`,
-    html: generateTicketEmailHTML(user.name, event.title, ticket.ticket_code, ticket.amount_paid, new Date(event.date).toISOString()),
+    html: generateTicketEmailHTML(
+      user.name,
+      event.title,
+      ticket.ticket_code,
+      ticket.amount_paid,
+      new Date(event.date).toISOString(),
+      TICKET_QR_CID,
+    ),
+    attachments: [
+      {
+        filename: 'ticket-qr.png',
+        content: qrCode,
+        cid: TICKET_QR_CID,
+      },
+    ],
     text: [
       `Hi ${user.name},`,
       '',

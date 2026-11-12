@@ -118,10 +118,15 @@ function MyEventsTab({ events, onDelete }) {
               </p>
             </div>
 
-            <div className="mt-auto flex gap-2">
+            <div className="mt-auto flex flex-wrap gap-2">
               <Link to={`/events/${event.id}`} className="btn btn-outline flex-1 py-2">
                 View
               </Link>
+              {!isFundraiser && !event.isScraped && /^\d+$/.test(event.id) && (
+                <Link to={`/events/${event.id}/check-in`} className="btn btn-accent flex-1 py-2">
+                  Scan
+                </Link>
+              )}
               <Link to={`/events/${event.id}/edit`} className="btn btn-dark flex-1 py-2">
                 Edit
               </Link>

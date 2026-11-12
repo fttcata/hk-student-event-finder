@@ -6,6 +6,7 @@ import CreateEventPage from './pages/CreateEventPage.jsx'
 import AdminEventsPage from './pages/AdminEventsPage.jsx'
 import TicketCheckoutPage from './pages/TicketCheckoutPage.jsx'
 import DashboardPage from './pages/DashboardPage.jsx'
+import EventCheckInPage from './pages/EventCheckInPage.jsx'
 import EventDetailPage from './pages/EventDetailPage.jsx'
 import EventsPage from './pages/EventsPage.jsx'
 import HomePage from './pages/HomePage.jsx'
@@ -37,6 +38,14 @@ export default function App() {
               element={
                 <ProtectedRoute>
                   <TicketCheckoutPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/events/:id/check-in"
+              element={
+                <ProtectedRoute>
+                  <EventCheckInPage />
                 </ProtectedRoute>
               }
             />
