@@ -3,8 +3,10 @@ import { Link } from 'react-router-dom'
 import {
   cancelAllUserEvents,
   cancelEvent,
+  deleteAdminUser,
   deleteAllCedarsEvents,
   deleteEvent,
+  fetchAdminUsers,
   fetchManagedEvents,
   refreshCedarsEvents,
 } from '../api/events.js'
@@ -18,6 +20,8 @@ export default function AdminEventsPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [scraping, setScraping] = useState(false)
+  const [users, setUsers] = useState([])
+  const [usersLoading, setUsersLoading] = useState(true)
 
   const loadEvents = useCallback(async () => {
     try {
@@ -33,6 +37,25 @@ export default function AdminEventsPage() {
   useEffect(() => {
     loadEvents()
   }, [loadEvents])
+
+  useEffect(() => {
+    fetchAdminUsers()
+      .then(setUsers)
+      .catch((requestError) => setError(requestError.message))
+      .finally(() => setUsersLoading(false))
+  }, [])
+
+  async function handleDeleteUser(user) {
+    if (!window.confirm(`Permanently delete the account for ${user.name} (${user.email})?`)) return
+
+    setError('')
+    try {
+      await deleteAdminUser(user.id)
+      setUsers((current) => current.filter((item) => item.id !== user.id))
+    } catch (requestError) {
+      setError(requestError.message)
+    }
+  }
 
   async function handleCancel(event) {
     if (!window.confirm(`Cancel "${event.title}"? Existing tickets and pledges will be kept.`)) return
@@ -187,12 +210,41 @@ export default function AdminEventsPage() {
                       </button>
                     </>
                   )}
+
                 </div>
               </article>
             )
           })}
         </div>
       )}
+
+      <section className="mt-12">
+        <h2 className="display text-3xl">Manage accounts</h2>
+        <p className="mt-2 text-sm text-muted">Accounts with owned events or tickets purchased for other attendees must be handled first.</p>
+        {usersLoading ? (
+          <p className="mt-4 text-sm text-muted">Loading accounts…</p>
+        ) : (
+          <div className="mt-4 space-y-3">
+            {users.map((account) => (
+              <article key={account.id} className="panel flex flex-col gap-3 sm:flex-row sm:items-center">
+                <div className="min-w-0 flex-1">
+                  <p className="font-semibold">{account.name}</p>
+                  <p className="text-sm text-muted">{account.email} · {account.role}</p>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-outline py-2 text-accent"
+                  disabled={account.role === 'admin'}
+                  title={account.role === 'admin' ? 'Administrator accounts cannot be deleted here' : undefined}
+                  onClick={() => handleDeleteUser(account)}
+                >
+                  {account.role === 'admin' ? 'Admin account' : 'Delete account'}
+                </button>
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
 
       {pageCount > 1 && (
         <nav className="mt-6 flex items-center justify-between" aria-label="Event pages">

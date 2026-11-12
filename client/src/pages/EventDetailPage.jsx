@@ -6,7 +6,7 @@ import Receipt from '../components/Receipt.jsx'
 import TicketCounter from '../components/TicketCounter.jsx'
 import EventChatRoom from '../components/EventChatRoom.jsx'
 import FundraiserDonateModal from '../components/FundraiserDonateModal.jsx'
-import { cancelEvent, fetchEvent, fetchMyTickets } from '../api/events.js'
+import { cancelEvent, donateToEvent, fetchEvent, fetchMyTickets } from '../api/events.js'
 import { useActivity } from '../context/ActivityContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { useEvents } from '../hooks/useEvents.js'
@@ -107,25 +107,49 @@ function TicketPanel({ event }) {
 }
 
 // Fundraiser pledge form with live progress towards the goal.
-function PledgePanel({ event }) {
+// API events are pledged through POST /events/:id/donate; demo events (API offline) stay in this browser.
+function PledgePanel({ event, isApiEvent }) {
   const { user } = useAuth()
   const { pledge } = useActivity()
   const now = useNow()
   const [amount, setAmount] = useState('50')
   const [receipt, setReceipt] = useState(null)
   const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
   const [donateOpen, setDonateOpen] = useState(false)
 
   const isClosed = new Date(event.date).getTime() - REGISTRATION_CLOSES_BEFORE_MS <= now
-  const percent = event.goal > 0 ? Math.round((event.raised / event.goal) * 100) : 0
+  const percentOf = (raised) => (event.goal > 0 ? Math.round((raised / event.goal) * 100) : 0)
+  const percent = percentOf(event.raised)
 
-  function handleSubmit(e) {
+  function showApiReceipt(result) {
+    setReceipt({
+      reference: result.pledge.reference_code,
+      amount: Number(result.pledge.amount),
+      raised: Number(result.event?.raised_amount ?? event.raised + Number(result.pledge.amount)),
+    })
+  }
+
+  async function handleSubmit(e) {
     e.preventDefault()
     const value = Number(amount)
     if (!Number.isInteger(value) || value < 10) return setError('Pledges must be a whole amount of at least HK$10.')
     if (value > 100000) return setError('Pledges are capped at HK$100,000.')
     setError('')
-    setReceipt(pledge(event, value))
+
+    if (!isApiEvent) {
+      const donation = pledge(event, value)
+      setReceipt({ ...donation, raised: event.raised + value })
+      return
+    }
+    setSaving(true)
+    try {
+      showApiReceipt(await donateToEvent(event.id, value))
+    } catch (requestError) {
+      setError(requestError.message)
+    } finally {
+      setSaving(false)
+    }
   }
 
   if (receipt) {
@@ -137,7 +161,7 @@ function PledgePanel({ event }) {
         rows={[
           ['Campaign', event.title],
           ['Amount', formatMoney(receipt.amount)],
-          ['New total', `${formatMoney(event.raised)} (${percent}%)`],
+          ['New total', `${formatMoney(receipt.raised)} (${percentOf(receipt.raised)}%)`],
         ]}
       />
     )
@@ -196,12 +220,12 @@ function PledgePanel({ event }) {
             />
           </label>
           {error && <p className="text-xs text-accent">{error}</p>}
-          <button type="submit" className="btn btn-accent w-full">
-            Pledge {amount && Number(amount) > 0 ? formatMoney(amount) : ''}
+          <button type="submit" className="btn btn-accent w-full" disabled={saving}>
+            {saving ? 'Processing…' : `Pledge ${amount && Number(amount) > 0 ? formatMoney(amount) : ''}`}
           </button>
         </div>
       )}
-      {donateOpen && <FundraiserDonateModal event={event} onClose={() => setDonateOpen(false)} onSuccess={(result) => { setDonateOpen(false); setReceipt({ reference: result.pledge.reference_code, amount: result.pledge.amount }) }} />}
+      {donateOpen && <FundraiserDonateModal event={event} onClose={() => setDonateOpen(false)} onSuccess={(result) => { setDonateOpen(false); showApiReceipt(result) }} />}
     </form>
   )
 }
@@ -211,7 +235,7 @@ export default function EventDetailPage() {
   const navigate = useNavigate()
   const { user, token } = useAuth()
   const { bookings, bookmarks, toggleBookmark } = useActivity()
-  const { events, loading } = useEvents()
+  const { events, source, loading } = useEvents()
   const ownerKey = user && token ? String(user.id ?? user.email) : ''
   const [ticketResult, setTicketResult] = useState({ ownerKey: '', eventIds: [], error: '' })
   const listedEvent = events.find((e) => e.id === id)
@@ -269,6 +293,9 @@ export default function EventDetailPage() {
   }, [id, loading, listedEvent])
 
   const event = listedEvent ?? requestedEvent
+  // Demo events also have numeric ids, so where the event came from decides, not the id format.
+  const isApiEvent =
+    Boolean(event) && !String(event.id).startsWith('local-') && (listedEvent ? source === 'api' : Boolean(requestedEvent))
 
   if (loading || detailLoading) {
     return <main className="mx-auto max-w-6xl px-4 py-16 text-muted sm:px-6">Loading event…</main>
@@ -418,7 +445,7 @@ export default function EventDetailPage() {
             <div className="panel text-sm text-muted">Registration and pledges are closed for this event.</div>
           ) : (
             <>
-              {kind === 'fundraiser' ? <PledgePanel event={event} /> : <TicketPanel event={event} />}
+              {kind === 'fundraiser' ? <PledgePanel event={event} isApiEvent={isApiEvent} /> : <TicketPanel event={event} />}
               {kind !== 'fundraiser' && hasJoined && (
                 <a
                   href={googleCalendarUrl(event)}

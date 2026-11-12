@@ -1,6 +1,7 @@
 import nodemailer from 'nodemailer'
 import QRCode from 'qrcode'
 import { generateTicketEmailHTML } from '../utils/emailTemplates.js'
+import { generateBookingSummaryEmailHTML } from '../utils/emailTemplates.js'
 
 const TICKET_QR_CID = 'ticket-qr@campushub'
 
@@ -132,14 +133,33 @@ export async function sendTicketReceipt({ user, event, ticket }) {
 
 // Sent to the buyer when they book seats for other students. Each attendee still gets their own
 // ticket receipt above; this message is the buyer's record of the whole purchase.
+// Sent only to the buyer for every booking; the message contains every ticket QR code.
 export async function sendBookingSummary({ user, event, tickets }) {
   if (!transporter) throw new Error('SMTP is not configured')
 
   const total = tickets.reduce((sum, ticket) => sum + Number(ticket.amount_paid), 0)
+  const ticketsWithQr = await Promise.all(tickets.map(async (ticket) => ({
+    ...ticket,
+    qrCid: `booking-qr-${ticket.ticket_code}`,
+    qrCode: await QRCode.toBuffer(ticket.ticket_code, { type: 'png', width: 320, margin: 2 }),
+  })))
   return transporter.sendMail({
     from: FROM,
     to: user.email,
     subject: `Group booking confirmed — ${event.title}`,
+    html: generateBookingSummaryEmailHTML(
+      user.name,
+      event.title,
+      ticketsWithQr,
+      new Date(event.date).toISOString(),
+      event.location,
+      total,
+    ),
+    attachments: ticketsWithQr.map((ticket) => ({
+      filename: `ticket-${ticket.ticket_code}.png`,
+      content: ticket.qrCode,
+      cid: ticket.qrCid,
+    })),
     text: [
       `Hi ${user.name},`,
       '',
@@ -154,7 +174,7 @@ export async function sendBookingSummary({ user, event, tickets }) {
       `Location: ${event.location}`,
       `Total paid: HK$${total.toFixed(2)}`,
       '',
-      'Each attendee has received their own ticket email with their code.',
+      'This email includes the QR code for every ticket in the booking.',
       '— Campus Hub',
     ].join('\n'),
   })

@@ -53,14 +53,20 @@ DB_HOST=127.0.0.1 DB_PORT=3307 npm run admin:promote -- your-verified-account@ex
 ```
 
 Log out and sign in again after promotion. Admins can manage published
-events from the Admin link; cancelling an event keeps its tickets and pledges as records.
+events and delete eligible student accounts from the Admin link. Cancelling an event keeps its
+tickets and pledges as records. Accounts owning events or tickets purchased for other attendees
+must be handled before they can be deleted.
 
 The database credentials in `server/.env.example` match `docker-compose.yml` for local development only. Do not use them in production.
 
-Email receipts: `docker compose up -d` also starts **Mailpit**, a local mock SMTP server, so every booking
-confirmation and donation receipt appears in the mock inbox at `http://localhost:8025` — no external
-credentials required. On startup the server logs `SMTP ready (mailpit:1025)`; if you see a warning instead,
-recreate the server container with `docker compose up -d server`.
+Email receipts use the **Mailtrap Email Sandbox**. Copy `server/.env.example` to `server/.env`,
+then add your Mailtrap credentials before starting Compose:
+
+```sh
+cp server/.env.example server/.env
+```
+
+On startup the server logs `SMTP ready (sandbox.smtp.mailtrap.io:2525)` when the connection succeeds.
 
 ### Demo data (presentation prep)
 
@@ -82,20 +88,14 @@ and bookmarks. Demo logins (the client only accepts HKU/CUHK/PolyU domains):
 - `demo.student@connect.hku.hk` / `Demo1234!` — student dashboard with tickets and a donation
 - `hku.careers@connect.hku.hk` / `Demo1234!` — organizer of the HKU Careers Fair
 
-To use a Mailtrap sandbox in Docker instead of Mailpit, override the SMTP settings for Compose (shell
-variables or a root `.env`, which Compose reads for interpolation):
-
-```sh
-SMTP_HOST=sandbox.smtp.mailtrap.io SMTP_PORT=2525 \
-SMTP_USER=your-mailtrap-username SMTP_PASSWORD=your-mailtrap-password \
-  docker compose up -d server
-```
-
-For non-Docker development, `server/.env` already points at Mailpit on `127.0.0.1:1025`.
+For non-Docker development, copy `server/.env.example` to `server/.env` and set its `SMTP_*`
+values to your Mailtrap sandbox credentials. The server explicitly loads `server/.env` even when
+started from the repository root.
 
 Ticket checkout collects a name and email address for each attendee. Each ticket is stored with its
-attendee details and its own reference code, and confirmation is sent to that attendee when SMTP is
-configured. After updating an existing MySQL volume, run this migration once from the repository root:
+attendee details and its own reference code. When SMTP is configured, only the buyer receives one
+confirmation containing all ticket QR codes. After updating an existing MySQL volume, run this
+migration once from the repository root:
 
 ```sh
 DB_HOST=127.0.0.1 DB_PORT=3307 DB_NAME=student_events DB_USER=app_user DB_PASSWORD=app_password \

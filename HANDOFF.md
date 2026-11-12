@@ -77,7 +77,8 @@ try {
 
   await conn.commit()
   // 4. Respond 201 immediately; send receipts in the background and log them.
-  //    sendBookingEmails(...) inserts email_log rows and never blocks the response.
+  //    sendBookingEmails(...) sends one buyer email containing all ticket QR codes and
+  //    inserts email_log rows without blocking the response.
   setImmediate(() => sendBookingEmails({ buyer, event, tickets }))
   return response.status(201).json({ tickets, ticket: tickets[0], event, email_queued: true })
 } catch (err) {
@@ -131,7 +132,7 @@ Also require: authenticated, verified user + `tickets.status = 'confirmed'` or a
 | `GET /api/events` | `events` + `categories` | exists ✅ (add filters: type, free/paid, keyword, lat/lng bounds) |
 | `POST /api/events` | `events` | allow `event_type`, lat/lng, deadline; fundraiser requires `goal_amount` (400 if missing, else 500 from CHECK) |
 | `PUT /api/events/:id` | `events` | organizer only; same fundraiser rule on UPDATE |
-| `POST /api/events/:id/tickets` | `tickets` + `events` | **transaction pattern §2**; body `{ attendees: [student emails] }` (1–4) → 201 + one UUID per attendee; decrements `available_tickets`; 409 when full/already held; 401/403 if unverified; receipts queued in the background |
+| `POST /api/events/:id/tickets` | `tickets` + `events` | **transaction pattern §2**; body `{ attendees: [student emails] }` (1–4) → 201 + one UUID per attendee; decrements `available_tickets`; 409 when full/already held; 401/403 if unverified; one buyer-only receipt with all QR codes queued in the background |
 | `DELETE /api/events/:id/ticket` | `tickets` + `events` | holder only; set `status='cancelled'` (do not DELETE) and restore one `available_tickets` seat |
 | `POST /api/events/:id/pledge` | `pledges` | repeated allowed; 201 + reference code; `amount > 0` → 400 |
 | `GET /api/events/:id/progress` | `pledges` | `SUM(amount)` vs `goal_amount` |

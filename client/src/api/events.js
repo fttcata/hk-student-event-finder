@@ -89,6 +89,21 @@ export async function fetchMyTickets() {
   return data.tickets
 }
 
+export async function fetchMyPledges() {
+  const data = await apiGet('/users/me/pledges')
+  return data.pledges
+}
+
+// Every listing the signed-in user organises (not paginated, unlike GET /events).
+export async function fetchMyEvents() {
+  const data = await apiGet('/users/me/events')
+  return data.events.map(normalizeEvent)
+}
+
+export async function donateToEvent(id, amount) {
+  return apiPost(`/events/${encodeURIComponent(id)}/donate`, { amount })
+}
+
 export async function createEvent(payload) {
   return apiPost('/events', payload)
 }
@@ -144,6 +159,15 @@ export async function cancelAllUserEvents() {
 
 export async function deleteAllCedarsEvents() {
   return apiDelete('/events/admin/cedars')
+}
+
+export async function fetchAdminUsers() {
+  const data = await apiGet('/users/admin')
+  return data.users
+}
+
+export async function deleteAdminUser(id) {
+  return apiDelete(`/users/admin/${encodeURIComponent(id)}`)
 }
 
 export async function bookEventTickets(id, { attendees }) {

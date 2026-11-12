@@ -1,5 +1,5 @@
 // Must stay the first import: later modules read process.env while they load.
-import 'dotenv/config'
+import '../config/loadEnv.js'
 import { createServer } from 'node:http'
 import cors from 'cors'
 import express from 'express'

@@ -347,7 +347,7 @@ $newRow = (Sql "SELECT id FROM tickets WHERE user_id=$($f1.user.id) AND event_id
 Sql "SELECT id,user_id,purchased_by,event_id,status,ticket_code,amount_paid FROM tickets WHERE event_id IN ($free,$paid,$tiny,$race) ORDER BY id"
 Sql "SELECT id,capacity,available_tickets FROM events WHERE id IN ($free,$paid,$tiny,$race) ORDER BY id"
 Sql "SELECT COUNT(*) AS confirmed_race_seats FROM tickets WHERE event_id=$race AND status='confirmed' AND user_id<>$($org.user.id)"
-Sql "SELECT COUNT(*) AS booking_emails FROM email_log WHERE user_id IN ($($buyer.user.id),$($f1.user.id),$($f2.user.id),$($other.user.id)) AND type='booking' AND CHAR_LENGTH(reference_code)=36"
+Sql "SELECT COUNT(*) AS buyer_booking_emails FROM email_log WHERE user_id=$($buyer.user.id) AND type='booking' AND CHAR_LENGTH(reference_code)=36"
 
 # Receipts are queued in the background: poll briefly before asserting the rows exist
 $deadline = (Get-Date).AddSeconds(10)
@@ -355,7 +355,7 @@ do {
   Start-Sleep -Milliseconds 200
   $emails = [int](Sql "SELECT COUNT(*) FROM email_log WHERE user_id IN ($($buyer.user.id),$($f1.user.id),$($f2.user.id),$($other.user.id)) AND type='booking'").Trim()
 } while ($emails -lt 10 -and (Get-Date) -lt $deadline)
-"booking emails -> $emails/10   # failed without SMTP, sent with Mailtrap credentials"
+"booking emails -> $emails/10   # sent with Mailtrap credentials"
 
 # Cleanup: tickets first (FK RESTRICT), then events, then users
 Sql "DELETE FROM tickets WHERE event_id IN (SELECT id FROM events WHERE organizer_id=$($org.user.id))" | Out-Null
@@ -371,8 +371,9 @@ The three paid tickets total HK$60 with `available_tickets = 0`; the free event 
 `reference_code` aliases it for older clients, and cancellation through
 `DELETE /events/:id/ticket` restores one seat before rebooking consumes it again. Receipts are
 sent in the background: without SMTP settings the responses still include `email_queued: true`
-and all `email_log` rows appear as `failed`; with the bundled Mailpit mock server (the Compose
-default) or Mailtrap credentials those rows become `sent`.
+and all buyer-owned `email_log` rows appear as `failed`; with valid Mailtrap credentials those
+rows become `sent`. Only the buyer receives the booking email, which contains every ticket QR
+code; attendees do not receive separate emails.
 
 ## 11. Event chat tests (`GET /api/events/:id/messages`, protected)
 

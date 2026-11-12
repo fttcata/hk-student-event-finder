@@ -241,6 +241,9 @@ function EventForm({ existing, persisted = false }) {
             Map preview appears here
           </div>
         )}
+        <p className="text-xs text-muted">
+          * We take a 5% fee on proceeds from tickets sold through our website. This does not apply to fundraisers.
+        </p>
         <button type="submit" className="btn btn-dark w-full">
           {existing ? 'Save changes' : 'Publish event'}
         </button>

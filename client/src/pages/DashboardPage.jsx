@@ -1,4 +1,6 @@
+import { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
+import { deleteEvent as deleteApiEvent, fetchMyEvents, fetchMyPledges, fetchMyTickets } from '../api/events.js'
 import EventCard from '../components/EventCard.jsx'
 import ProgressBar from '../components/ProgressBar.jsx'
 import { useActivity } from '../context/ActivityContext.jsx'
@@ -18,6 +20,70 @@ const CHAT_STYLES = {
   locked: 'bg-ink/5 text-muted',
   open: 'bg-leaf/20 text-teal',
   closed: 'bg-ink/5 text-muted line-through',
+}
+
+// The API returns one ticket row per attendee; map it onto the booking shape the tabs render.
+function ticketToBooking(ticket) {
+  return {
+    reference: ticket.reference_code,
+    eventId: String(ticket.event.id),
+    title: ticket.event.title,
+    date: ticket.event.date,
+    location: ticket.event.location,
+    quantity: 1,
+    total: Number(ticket.amount_paid ?? 0),
+    cancelled: ticket.status === 'cancelled' || ticket.event.status === 'cancelled',
+  }
+}
+
+function apiPledgeToPledge(pledge) {
+  return {
+    reference: pledge.reference_code,
+    eventId: String(pledge.event.id),
+    title: pledge.event.title,
+    amount: Number(pledge.amount),
+    createdAt: pledge.created_at,
+  }
+}
+
+// Loads the signed-in user's tickets, pledges and organised events from the API.
+// Reloads after a checkout elsewhere in the app, or when `reload()` is called.
+function useAccountActivity(token, enabled) {
+  const [result, setResult] = useState({ token: null, status: 'loading' })
+  const [reloadKey, setReloadKey] = useState(0)
+
+  useEffect(() => {
+    if (!enabled || !token) return undefined
+
+    let active = true
+    Promise.all([fetchMyTickets(), fetchMyPledges(), fetchMyEvents()])
+      .then(([tickets, pledges, events]) => {
+        if (!active) return
+        setResult({
+          token,
+          status: 'ready',
+          bookings: tickets.map(ticketToBooking),
+          pledges: pledges.map(apiPledgeToPledge),
+          events,
+        })
+      })
+      .catch((error) => {
+        if (active) setResult({ token, status: 'error', error: error.message })
+      })
+
+    return () => {
+      active = false
+    }
+  }, [token, enabled, reloadKey])
+
+  useEffect(() => {
+    const reload = () => setReloadKey((key) => key + 1)
+    window.addEventListener('campushub:ticket-booked', reload)
+    return () => window.removeEventListener('campushub:ticket-booked', reload)
+  }, [])
+
+  const current = result.token === token ? result : { status: 'loading' }
+  return { ...current, reload: () => setReloadKey((key) => key + 1) }
 }
 
 function EmptyState({ text, to, action }) {
@@ -53,7 +119,11 @@ function TicketsTab({ bookings }) {
             </div>
             <div className="flex flex-wrap items-center gap-3 sm:flex-col sm:items-end">
               <span className="font-mono text-sm tracking-wider">{booking.reference}</span>
-              <span className={`rounded-full px-2.5 py-1 text-xs ${CHAT_STYLES[chat.state]}`}>{chat.label}</span>
+              {booking.cancelled ? (
+                <span className="rounded-full bg-ink/5 px-2.5 py-1 text-xs text-muted">Cancelled</span>
+              ) : (
+                <span className={`rounded-full px-2.5 py-1 text-xs ${CHAT_STYLES[chat.state]}`}>{chat.label}</span>
+              )}
             </div>
           </li>
         )
@@ -133,7 +203,7 @@ function MyEventsTab({ events, onDelete }) {
               <button
                 type="button"
                 className="btn btn-outline py-2 text-accent"
-                onClick={() => window.confirm(`Delete "${event.title}"?`) && onDelete(event.id)}
+                onClick={() => onDelete(event)}
               >
                 Delete
               </button>
@@ -146,19 +216,55 @@ function MyEventsTab({ events, onDelete }) {
 }
 
 export default function DashboardPage() {
-  const { user } = useAuth()
-  const { bookings, pledges, bookmarks, deleteEvent } = useActivity()
-  const { events } = useEvents()
+  const { user, token } = useAuth()
+  const activity = useActivity()
+  const { bookmarks } = activity
+  const { events, source } = useEvents()
+  const [deleteError, setDeleteError] = useState('')
+
+  // With the API online, tickets/pledges/organised events live in MySQL. Browser storage only
+  // holds what was done in demo mode (API offline), so it is the fallback, not the source.
+  const useApi = Boolean(token) && source !== 'demo'
+  const account = useAccountActivity(token, useApi)
+  const remote = useApi && account.status === 'ready' ? account : null
+  // Until useEvents knows whether the API is reachable, a failed request may just mean "offline".
+  const remoteLoading = useApi && (account.status === 'loading' || (account.status === 'error' && source !== 'api'))
+  const remoteError = useApi && source === 'api' && account.status === 'error' ? account.error : ''
+
+  const bookings = remote ? remote.bookings : useApi ? [] : activity.bookings
+  const pledges = remote ? remote.pledges : useApi ? [] : activity.pledges
 
   // Active tab is kept in the URL (?tab=pledges) so links like "View in dashboard" can target a tab.
   const [searchParams, setSearchParams] = useSearchParams()
   const requested = searchParams.get('tab')
   const tab = TABS.some(([key]) => key === requested) ? requested : 'tickets'
 
-  const myEvents = events.filter((event) => event.organizerEmail === user.email)
+  // Events created in this browser (demo mode) are never on the server, so keep them alongside.
+  const localEvents = activity.createdEvents.filter((event) => event.organizerEmail === user.email)
+  const myEvents = remote
+    ? [...localEvents, ...remote.events]
+    : useApi
+      ? localEvents
+      : events.filter((event) => event.organizerEmail === user.email)
   const savedEvents = events.filter((event) => bookmarks.includes(event.id))
   const totalPledged = pledges.reduce((sum, p) => sum + p.amount, 0)
-  const ticketCount = bookings.reduce((sum, b) => sum + b.quantity, 0)
+  const ticketCount = bookings.filter((b) => !b.cancelled).reduce((sum, b) => sum + b.quantity, 0)
+
+  async function handleDelete(event) {
+    setDeleteError('')
+    if (String(event.id).startsWith('local-')) {
+      if (window.confirm(`Delete "${event.title}"?`)) activity.deleteEvent(event.id)
+      return
+    }
+    // Server events are cancelled rather than removed: tickets and pledges are receipts.
+    if (!window.confirm(`Cancel "${event.title}"? Existing tickets and pledges will be kept.`)) return
+    try {
+      await deleteApiEvent(event.id)
+      account.reload()
+    } catch (requestError) {
+      setDeleteError(requestError.message)
+    }
+  }
 
   const stats = [
     ['Tickets booked', ticketCount],
@@ -207,9 +313,25 @@ export default function DashboardPage() {
       </div>
 
       <div className="mt-6">
-        {tab === 'tickets' && <TicketsTab bookings={bookings} />}
-        {tab === 'pledges' && <PledgesTab pledges={pledges} />}
-        {tab === 'events' && <MyEventsTab events={myEvents} onDelete={deleteEvent} />}
+        {remoteError && (
+          <p role="alert" className="panel mb-4 text-sm text-accent">
+            Unable to load your account activity: {remoteError}
+          </p>
+        )}
+        {deleteError && (
+          <p role="alert" className="panel mb-4 text-sm text-accent">
+            {deleteError}
+          </p>
+        )}
+        {remoteLoading && tab !== 'saved' ? (
+          <p className="text-muted">Loading…</p>
+        ) : (
+          <>
+            {tab === 'tickets' && <TicketsTab bookings={bookings} />}
+            {tab === 'pledges' && <PledgesTab pledges={pledges} />}
+            {tab === 'events' && <MyEventsTab events={myEvents} onDelete={handleDelete} />}
+          </>
+        )}
         {tab === 'saved' &&
           (savedEvents.length === 0 ? (
             <EmptyState text="Tap “Save for later” on any event to keep it here." to="/events" action="Browse events" />
