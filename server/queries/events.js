@@ -82,6 +82,18 @@ export async function listEventRows(filters, limit, offset) {
   return { rows, total }
 }
 
+// Every listing the user organises (no pagination), for their dashboard. Cancelled and draft
+// events are left out, matching what DELETE /api/events/:id does to a listing.
+export async function listEventRowsByOrganizer(organizerId) {
+  const [rows] = await pool.query(
+    `${EVENT_SELECT}
+     WHERE e.organizer_id = ? AND e.status = 'published' AND e.source IS NULL
+     ORDER BY e.event_date ASC, e.id ASC`,
+    [organizerId],
+  )
+  return rows
+}
+
 export async function findEventRow(eventId) {
   const [[row]] = await pool.query(`${EVENT_SELECT} WHERE e.id = ? AND e.status <> 'draft' LIMIT 1`, [eventId])
   return row ?? null

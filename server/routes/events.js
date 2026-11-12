@@ -60,7 +60,7 @@ function serializeOrganizer(row, viewer) {
   return { ...organizer, email: row.organizer_email, student_id: row.organizer_student_id }
 }
 
-function serializeEvent(row, viewer) {
+export function serializeEvent(row, viewer) {
   // capacity = 0 means unlimited seats; standard events keep a stored available_tickets counter.
   const remaining = row.capacity > 0 ? row.available_tickets : null
   const goal = row.goal_amount
