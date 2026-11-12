@@ -1,7 +1,10 @@
 import { Router } from 'express'
 import { requireAdmin, requireAuth } from '../middleware/auth.js'
+import { listEventRowsByOrganizer } from '../queries/events.js'
+import { listPledgeRowsForUser } from '../queries/pledges.js'
 import { listTicketRowsForUser } from '../queries/tickets.js'
 import { deleteUserForAdmin, listUsersForAdmin } from '../queries/users.js'
+import { serializeEvent } from './events.js'
 
 const router = Router()
 
@@ -59,6 +62,34 @@ router.get('/me/tickets', requireAuth, async (request, response) => {
   }))
 
   return response.status(200).json({ tickets })
+})
+
+// The signed-in student's pledges, newest first. Pledges are receipts, so ones made to a
+// fundraiser that was later cancelled are still listed.
+router.get('/me/pledges', requireAuth, async (request, response) => {
+  const rows = await listPledgeRowsForUser(request.user.id)
+
+  const pledges = rows.map((row) => ({
+    id: row.id,
+    amount: row.amount,
+    reference_code: row.reference_code,
+    created_at: row.created_at,
+    event: {
+      id: row.event_id,
+      title: row.title,
+      date: row.event_date,
+      status: row.event_status,
+    },
+  }))
+
+  return response.status(200).json({ pledges })
+})
+
+// Every published listing the signed-in user organises, unpaginated, in the GET /api/events shape.
+router.get('/me/events', requireAuth, async (request, response) => {
+  const rows = await listEventRowsByOrganizer(request.user.id)
+  const events = rows.map((row) => serializeEvent(row, request.user))
+  return response.status(200).json({ events })
 })
 
 export default router

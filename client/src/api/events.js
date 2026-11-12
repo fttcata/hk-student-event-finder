@@ -89,6 +89,21 @@ export async function fetchMyTickets() {
   return data.tickets
 }
 
+export async function fetchMyPledges() {
+  const data = await apiGet('/users/me/pledges')
+  return data.pledges
+}
+
+// Every listing the signed-in user organises (not paginated, unlike GET /events).
+export async function fetchMyEvents() {
+  const data = await apiGet('/users/me/events')
+  return data.events.map(normalizeEvent)
+}
+
+export async function donateToEvent(id, amount) {
+  return apiPost(`/events/${encodeURIComponent(id)}/donate`, { amount })
+}
+
 export async function createEvent(payload) {
   return apiPost('/events', payload)
 }
