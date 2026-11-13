@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { apiGet, apiPost } from '../api/client.js'
 import { fetchMyTickets } from '../api/events.js'
 import { ChatListSkeleton } from './LoadingSkeleton.jsx'
 import { useActivity } from '../context/ActivityContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
+import { useEventChat } from '../hooks/useEventChat.js'
 import { useNow } from '../hooks/useNow.js'
 import { formatDateTime, getChatStatus } from '../utils/format.js'
 
@@ -66,7 +66,6 @@ export default function FloatingEventChat() {
   const [isOpen, setIsOpen] = useState(false)
   const [selectedRoomId, setSelectedRoomId] = useState(null)
   const [ticketResult, setTicketResult] = useState({ ownerKey: '', tickets: [], error: '' })
-  const [messageResult, setMessageResult] = useState({ roomId: null, messages: [], error: '' })
   const [messageText, setMessageText] = useState('')
   const ownerKey = user ? String(user.id ?? user.email) : ''
 
@@ -104,43 +103,14 @@ export default function FloatingEventChat() {
   const selectedRoom = rooms.find((room) => room.id === selectedRoomId) ?? null
   const chatRoomId = selectedRoom?.id
   const chatRoomState = selectedRoom?.chat.state
-  const messageResultForRoom = messageResult.roomId === chatRoomId ? messageResult : null
-  const remoteMessages = messageResultForRoom?.messages ?? []
-  const conversationError = messageResultForRoom?.error ?? ''
-  const loadingMessages = Boolean(
-    isOpen && chatRoomId && chatRoomState === 'open' && /^\d+$/.test(chatRoomId) && !messageResultForRoom,
-  )
-  const visibleMessages = [
-    ...remoteMessages,
-  ]
-
-  useEffect(() => {
-    if (!isOpen || !chatRoomId || chatRoomState !== 'open' || !/^\d+$/.test(chatRoomId)) return undefined
-
-    let active = true
-
-    async function loadMessages() {
-      try {
-        const data = await apiGet(`/events/${encodeURIComponent(chatRoomId)}/messages`)
-        if (active) setMessageResult({ roomId: chatRoomId, messages: data.messages ?? [], error: '' })
-      } catch (error) {
-        if (active) {
-          setMessageResult((current) => ({
-            roomId: chatRoomId,
-            messages: current.roomId === chatRoomId ? current.messages : [],
-            error: `Unable to load messages: ${error.message}`,
-          }))
-        }
-      }
-    }
-
-    loadMessages()
-    const timer = window.setInterval(loadMessages, 5000)
-    return () => {
-      active = false
-      window.clearInterval(timer)
-    }
-  }, [isOpen, chatRoomId, chatRoomState])
+  const {
+    messages,
+    loading: loadingMessages,
+    error: conversationError,
+    canChat,
+    sending,
+    sendMessage: sendChatMessage,
+  } = useEventChat(chatRoomId, { enabled: isOpen && Boolean(user) && chatRoomState === 'open' })
 
   if (!user || !token) return null
 
@@ -150,19 +120,10 @@ export default function FloatingEventChat() {
     if (!selectedRoom || selectedRoom.chat.state !== 'open' || !content || sending) return
 
     try {
-      const data = await apiPost(`/events/${encodeURIComponent(selectedRoom.id)}/messages`, { content })
-      setMessageResult((current) => ({
-        roomId: selectedRoom.id,
-        messages: [...(current.roomId === selectedRoom.id ? current.messages : []), data.message],
-        error: '',
-      }))
+      await sendChatMessage(content)
       setMessageText('')
-    } catch (error) {
-      setMessageResult((current) => ({
-        ...current,
-        roomId: selectedRoom.id,
-        error: `Unable to send message: ${error.message}`,
-      }))
+    } catch {
+      // useEventChat surfaces the failure through `conversationError`.
     }
   }
 
@@ -274,7 +235,7 @@ export default function FloatingEventChat() {
                 {!loadingMessages && messages.length === 0 && selectedRoom.chat.state === 'open' && !conversationError && (
                   <p className="pt-8 text-center text-sm text-muted">No messages yet. Say hello to the group.</p>
                 )}
-                {visibleMessages.map((message) => (
+                {messages.map((message) => (
                   <div
                     key={message.id}
                     className="max-w-[88%] rounded-lg bg-white px-3 py-2 text-sm"

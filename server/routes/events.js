@@ -5,6 +5,7 @@ import { sendBookingSummary, sendDonationReceipt } from '../config/email.js'
 import { optionalAuth, requireAdmin, requireAuth } from '../middleware/auth.js'
 import { findCategoryById, findCategoryByName } from '../queries/categories.js'
 import { insertEventMessage, isChatMember, listEventMessages } from '../queries/chat.js'
+import { broadcastChatMessage } from '../realtime/chat.js'
 import { logEmail } from '../queries/emailLog.js'
 import {
   cancelEvent,
@@ -306,6 +307,7 @@ router.post('/:id/messages', requireAuth, requireChatAccess, async (request, res
     userId: request.user.id,
     content,
   })
+  broadcastChatMessage(request.eventId, message)
   return response.status(201).json({ message })
 })
 
